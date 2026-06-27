@@ -22,6 +22,22 @@ public static class EnvironmentScatterBootstrapper
         "Assets/Polytope Studio/Lowpoly_Environments/Prefabs/Trees/PT_Fruit_Tree_01_plums.prefab"
     };
 
+    private static readonly string[] NatureTreePrefabPaths =
+    {
+        "Assets/NatureStarterKit2/Nature/tree01.prefab",
+        "Assets/NatureStarterKit2/Nature/tree02.prefab",
+        "Assets/NatureStarterKit2/Nature/tree03.prefab",
+        "Assets/NatureStarterKit2/Nature/tree04.prefab"
+    };
+
+    private static readonly string[] ConiferMeshAssetPaths =
+    {
+        "Assets/Forst/Conifers [BOTD]/Sources/Conifer Small/SM Conifer Small LOD0.asset",
+        "Assets/Forst/Conifers [BOTD]/Sources/Conifer Medium/SM Conifer Medium LOD0.asset",
+        "Assets/Forst/Conifers [BOTD]/Sources/Conifer Tall/SM Conifer Tall LOD0.asset",
+        "Assets/Forst/Conifers [BOTD]/Sources/Conifer Bare/SM Conifer Bare LOD0.asset"
+    };
+
     private static readonly string[] RockyTreePrefabPaths =
     {
         "Assets/Polytope Studio/Lowpoly_Environments/Prefabs/Trees/PT_Pine_Tree_03_dead.prefab",
@@ -32,6 +48,25 @@ public static class EnvironmentScatterBootstrapper
     private static readonly string[] ShrubPrefabPaths =
     {
         "Assets/Polytope Studio/Lowpoly_Environments/Prefabs/Shrubs/PT_Generic_Shrub_01_green.prefab"
+    };
+
+    private static readonly string[] NatureShrubPrefabPaths =
+    {
+        "Assets/NatureStarterKit2/Nature/bush01.prefab",
+        "Assets/NatureStarterKit2/Nature/bush02.prefab",
+        "Assets/NatureStarterKit2/Nature/bush03.prefab",
+        "Assets/NatureStarterKit2/Nature/bush04.prefab",
+        "Assets/NatureStarterKit2/Nature/bush05.prefab",
+        "Assets/NatureStarterKit2/Nature/bush06.prefab"
+    };
+
+    private static readonly string[] AnimalPrefabPaths =
+    {
+        "Assets/ithappy/Animals_FREE/Prefabs/Deer_001.prefab",
+        "Assets/ithappy/Animals_FREE/Prefabs/Horse_001.prefab",
+        "Assets/ithappy/Animals_FREE/Prefabs/Dog_001.prefab",
+        "Assets/ithappy/Animals_FREE/Prefabs/Kitty_001.prefab",
+        "Assets/ithappy/Animals_FREE/Prefabs/Chicken_001.prefab"
     };
 
     private static readonly string[] ShorePlantPrefabPaths =
@@ -98,14 +133,18 @@ public static class EnvironmentScatterBootstrapper
         Random.State previousRandomState = Random.state;
         Random.InitState(RandomSeed);
 
-        ScatterGroup(terrain, waterLevel, root.transform, "Shore Rocks", ShoreRockPrefabPaths, 190, 0.25f, 4.6f, 42f, 0.75f, 1.65f, true, true);
-        ScatterGroup(terrain, waterLevel, root.transform, "Shore Plants", ShorePlantPrefabPaths, 360, 0.35f, 5.8f, 32f, 0.75f, 1.35f, false, false);
-        ScatterGroup(terrain, waterLevel, root.transform, "Inland Trees", TreePrefabPaths, 145, 4.2f, 55f, 34f, 1.25f, 2.1f, false, true);
-        ScatterGroup(terrain, waterLevel, root.transform, "Shrubs", ShrubPrefabPaths, 420, 3.2f, 45f, 36f, 0.75f, 1.45f, false, false);
-        ScatterGroup(terrain, waterLevel, root.transform, "Flowers", FlowerPrefabPaths, 360, 4.4f, 35f, 24f, 0.8f, 1.25f, false, false);
-        ScatterGroup(terrain, waterLevel, root.transform, "Mushrooms", MushroomPrefabPaths, 140, 5.2f, 42f, 28f, 0.75f, 1.2f, false, false);
+        ScatterGroup(terrain, waterLevel, root.transform, "Shore Rocks", ShoreRockPrefabPaths, 170, 0.25f, 4.6f, 42f, 0.75f, 1.65f, true, true);
+        ScatterGroup(terrain, waterLevel, root.transform, "Shore Plants", ShorePlantPrefabPaths, 240, 0.35f, 5.8f, 32f, 0.75f, 1.35f, false, false);
+        ScatterGroup(terrain, waterLevel, root.transform, "Inland Trees", TreePrefabPaths, 65, 4.2f, 55f, 34f, 1.15f, 1.85f, false, true);
+        ScatterGroup(terrain, waterLevel, root.transform, "Mixed Island Trees", NatureTreePrefabPaths, 36, 4.8f, 46f, 28f, 0.55f, 1.05f, false, true);
+        ScatterMeshGroup(terrain, waterLevel, root.transform, "Sparse Conifers", ConiferMeshAssetPaths, 28, 5.5f, 62f, 30f, 0.6f, 1.25f, false, true);
+        ScatterGroup(terrain, waterLevel, root.transform, "Shrubs", ShrubPrefabPaths, 230, 3.2f, 45f, 36f, 0.75f, 1.45f, false, false);
+        ScatterGroup(terrain, waterLevel, root.transform, "Mixed Bushes", NatureShrubPrefabPaths, 125, 3.8f, 38f, 30f, 0.45f, 0.95f, false, true);
+        ScatterGroup(terrain, waterLevel, root.transform, "Flowers", FlowerPrefabPaths, 260, 4.4f, 35f, 24f, 0.8f, 1.25f, false, false);
+        ScatterGroup(terrain, waterLevel, root.transform, "Mushrooms", MushroomPrefabPaths, 90, 5.2f, 42f, 28f, 0.75f, 1.2f, false, false);
         ScatterGroup(terrain, waterLevel, root.transform, "Rocky Slopes", RockPrefabPaths, 260, 7f, 90f, 58f, 0.9f, 2.35f, true, true);
-        ScatterGroup(terrain, waterLevel, root.transform, "Dead Wood", RockyTreePrefabPaths, 28, 11f, 80f, 46f, 1f, 1.7f, false, true);
+        ScatterGroup(terrain, waterLevel, root.transform, "Dead Wood", RockyTreePrefabPaths, 22, 11f, 80f, 46f, 1f, 1.7f, false, true);
+        ScatterGroup(terrain, waterLevel, root.transform, "Island Animals", AnimalPrefabPaths, 18, 4.4f, 34f, 18f, 0.7f, 1.15f, false, true, false, true);
 
         Random.state = previousRandomState;
     }
@@ -123,7 +162,9 @@ public static class EnvironmentScatterBootstrapper
         float minScale,
         float maxScale,
         bool alignToSlope,
-        bool keepClearOfHome)
+        bool keepClearOfHome,
+        bool applyFallbackMaterials = true,
+        bool disableAmbientControlScripts = false)
     {
         GameObject[] prefabs = LoadPrefabs(prefabPaths);
 
@@ -158,7 +199,17 @@ public static class EnvironmentScatterBootstrapper
             instance.transform.rotation = GetScatterRotation(normal, alignToSlope);
             float scale = Random.Range(minScale, maxScale);
             instance.transform.localScale = Vector3.Scale(instance.transform.localScale, Vector3.one * scale);
-            ApplyFallbackMaterials(instance);
+
+            if (applyFallbackMaterials)
+            {
+                ApplyFallbackMaterials(instance);
+            }
+
+            if (disableAmbientControlScripts)
+            {
+                DisableAmbientControlScripts(instance);
+            }
+
             DisableColliders(instance);
             placedCount++;
         }
@@ -167,6 +218,113 @@ public static class EnvironmentScatterBootstrapper
         {
             Object.Destroy(groupObject);
         }
+    }
+
+    private static void ScatterMeshGroup(
+        Terrain terrain,
+        float waterLevel,
+        Transform root,
+        string groupName,
+        string[] meshAssetPaths,
+        int targetCount,
+        float minHeightAboveWater,
+        float maxHeightAboveWater,
+        float maxSteepness,
+        float minScale,
+        float maxScale,
+        bool alignToSlope,
+        bool keepClearOfHome)
+    {
+        Mesh[] meshes = LoadMeshes(meshAssetPaths);
+
+        if (meshes.Length == 0)
+        {
+            return;
+        }
+
+        GameObject groupObject = new GameObject(groupName);
+        groupObject.transform.SetParent(root.transform, false);
+        int placedCount = 0;
+        int maxAttempts = targetCount * 34;
+
+        for (int attempt = 0; attempt < maxAttempts && placedCount < targetCount; attempt++)
+        {
+            if (!TryGetScatterPoint(terrain, waterLevel, minHeightAboveWater, maxHeightAboveWater, maxSteepness, keepClearOfHome, out Vector3 position, out Vector3 normal))
+            {
+                continue;
+            }
+
+            Mesh mesh = meshes[Random.Range(0, meshes.Length)];
+            GameObject instance = CreateMeshInstance(mesh);
+
+            if (instance == null)
+            {
+                continue;
+            }
+
+            instance.transform.SetParent(groupObject.transform, true);
+            instance.transform.position = position;
+            instance.transform.rotation = GetScatterRotation(normal, alignToSlope);
+            float scale = Random.Range(minScale, maxScale);
+            instance.transform.localScale = Vector3.one * scale;
+            placedCount++;
+        }
+
+        if (placedCount == 0)
+        {
+            Object.Destroy(groupObject);
+        }
+    }
+
+    private static Mesh[] LoadMeshes(string[] meshAssetPaths)
+    {
+        List<Mesh> meshes = new List<Mesh>();
+
+#if UNITY_EDITOR
+        foreach (string meshAssetPath in meshAssetPaths)
+        {
+            Mesh mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshAssetPath);
+
+            if (mesh != null)
+            {
+                meshes.Add(mesh);
+            }
+        }
+#endif
+
+        return meshes.ToArray();
+    }
+
+    private static GameObject CreateMeshInstance(Mesh mesh)
+    {
+        if (mesh == null)
+        {
+            return null;
+        }
+
+        GameObject instance = new GameObject(mesh.name);
+        MeshFilter meshFilter = instance.AddComponent<MeshFilter>();
+        MeshRenderer meshRenderer = instance.AddComponent<MeshRenderer>();
+        meshFilter.sharedMesh = mesh;
+        meshRenderer.sharedMaterials = CreateConiferMaterials(mesh.subMeshCount);
+        return instance;
+    }
+
+    private static Material[] CreateConiferMaterials(int subMeshCount)
+    {
+        int materialCount = Mathf.Max(1, subMeshCount);
+        Material[] materials = new Material[materialCount];
+
+        for (int i = 0; i < materialCount; i++)
+        {
+            bool trunkMaterial = i == 0 && materialCount > 1;
+            Color color = trunkMaterial
+                ? new Color(0.42f, 0.28f, 0.17f, 1f)
+                : new Color(0.18f, 0.43f, 0.18f, 1f);
+            materials[i] = CreateFallbackMaterial(color, null, !trunkMaterial, trunkMaterial ? "ConiferTrunk_Fallback" : "ConiferNeedles_Fallback");
+        }
+
+        return materials;
     }
 
     private static bool TryGetScatterPoint(
@@ -311,6 +469,26 @@ public static class EnvironmentScatterBootstrapper
         foreach (Collider collider in colliders)
         {
             collider.enabled = false;
+        }
+    }
+
+    private static void DisableAmbientControlScripts(GameObject instance)
+    {
+        MonoBehaviour[] behaviours = instance.GetComponentsInChildren<MonoBehaviour>(true);
+
+        foreach (MonoBehaviour behaviour in behaviours)
+        {
+            if (behaviour == null)
+            {
+                continue;
+            }
+
+            string typeName = behaviour.GetType().Name;
+
+            if (typeName == "MovePlayerInput" || typeName == "CreatureMover" || typeName == "PlayerCamera")
+            {
+                behaviour.enabled = false;
+            }
         }
     }
 
