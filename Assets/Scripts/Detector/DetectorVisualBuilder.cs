@@ -1,9 +1,12 @@
 using UnityEngine;
 
-[ExecuteAlways]
+[DefaultExecutionOrder(150)]
 [RequireComponent(typeof(MetalDetector))]
 public class DetectorVisualBuilder : MonoBehaviour
 {
+    private const string ShadowVisualName = "MetalDetector_Shadow";
+    private const float ScreenRegistrationRefreshInterval = 0.5f;
+
     public Transform detectorHead;
     public string modelResourcePath = "Models/MetalDetector/Detector_Player";
     public Vector3 rootOffset = Vector3.zero;
@@ -22,22 +25,36 @@ public class DetectorVisualBuilder : MonoBehaviour
     public Vector3 fittedBoundsCenter = new Vector3(0f, -0.18f, 0.48f);
     public bool hideLegacyVisuals = true;
     public bool showOnlyLocalShadow = false;
+    public bool preserveExistingWorldDetectorTransform = true;
     public bool showFirstPersonDetector = true;
+    public string firstPersonModelResourcePath = "Models/MetalDetector/detector (2)";
     public Vector3 firstPersonModelLocalPosition = new Vector3(0.44f, -0.46f, 0.82f);
     public Vector3 firstPersonModelLocalEulerAngles = new Vector3(8f, -64.53f, 0f);
     public Vector3 firstPersonModelLocalScale = new Vector3(0.07f, 0.07f, 0.07f);
     public bool fitFirstPersonModelToView = true;
     public float firstPersonFittedModelSize = 0.7f;
     public Vector3 firstPersonFittedBoundsCenter = new Vector3(0.34f, -0.24f, 1.35f);
+    public bool configureHolderAsFirstPersonOnly = true;
+    public bool attachShadowVisualToRightHand = true;
+    public bool rotateShadowVisualWithHand = true;
+    public bool renderShadowVisualMesh = false;
 
     private MetalDetector metalDetector;
     private Transform visualRoot;
     private GameObject modelInstance;
     private GameObject firstPersonModelInstance;
     private Transform firstPersonModelParent;
+    private bool worldModelTransformApplied;
     private bool firstPersonTransformApplied;
     private Transform gripAnchor;
     private LocalPlayerAvatarVisual localPlayerAvatarVisual;
+    private static DetectorVisualBuilder activeHandAttachedDetector;
+    private Transform shadowVisual;
+    private bool shadowOffsetCaptured;
+    private Vector3 shadowHandLocalPositionOffset;
+    private Quaternion shadowHandLocalRotationOffset = Quaternion.identity;
+    private DetectorScreenSignalDisplay screenSignalDisplay;
+    private float nextScreenRegistrationTime;
 
     private void OnEnable()
     {
@@ -49,46 +66,83 @@ public class DetectorVisualBuilder : MonoBehaviour
         EnsureVisuals();
     }
 
-#if UNITY_EDITOR
-    private void OnValidate()
+    private void OnDisable()
     {
-        if (Application.isPlaying || !isActiveAndEnabled)
+        if (activeHandAttachedDetector == this)
         {
-            return;
+            activeHandAttachedDetector = null;
         }
 
-        UnityEditor.EditorApplication.delayCall -= RefreshEditorPreview;
-        UnityEditor.EditorApplication.delayCall += RefreshEditorPreview;
+        shadowOffsetCaptured = false;
     }
-
-    private void RefreshEditorPreview()
-    {
-        if (this == null || Application.isPlaying || !isActiveAndEnabled)
-        {
-            return;
-        }
-
-        ClearModelInstance();
-        EnsureVisuals();
-    }
-#endif
 
     private void EnsureVisuals()
     {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
         metalDetector = GetComponent<MetalDetector>();
         detectorHead = detectorHead != null ? detectorHead : metalDetector.detectorHead;
 
+        EnsureScreenSignalDisplay();
         EnsureDetectorHead();
-        CreateVisualRoot();
-        HideLegacyVisuals();
-        LoadDetectorModel();
+        CacheShadowVisual();
+        ApplyFirstPersonHolderVisibility();
+        ApplyShadowVisibility();
+        RegisterDetectorScreens(true);
     }
 
     private void LateUpdate()
     {
-        StickGripToPlayerRightHand();
-        KeepModelAttachedToVisualRoot();
-        KeepFirstPersonModelAttachedToCamera();
+        AttachShadowVisualToRightHand();
+        RegisterDetectorScreens(false);
+    }
+
+    private void EnsureScreenSignalDisplay()
+    {
+        if (screenSignalDisplay == null)
+        {
+            screenSignalDisplay = GetComponent<DetectorScreenSignalDisplay>();
+        }
+
+        if (screenSignalDisplay == null)
+        {
+            screenSignalDisplay = gameObject.AddComponent<DetectorScreenSignalDisplay>();
+        }
+    }
+
+    private void RegisterDetectorScreens(bool force)
+    {
+        if (screenSignalDisplay == null)
+        {
+            return;
+        }
+
+        if (!force && Time.unscaledTime < nextScreenRegistrationTime)
+        {
+            return;
+        }
+
+        nextScreenRegistrationTime = Time.unscaledTime + ScreenRegistrationRefreshInterval;
+
+        screenSignalDisplay.RegisterModelRoot(transform);
+
+        if (modelInstance != null)
+        {
+            screenSignalDisplay.RegisterModelRoot(modelInstance.transform);
+        }
+
+        if (firstPersonModelInstance != null)
+        {
+            screenSignalDisplay.RegisterModelRoot(firstPersonModelInstance.transform);
+        }
+
+        if (shadowVisual != null)
+        {
+            screenSignalDisplay.RegisterModelRoot(shadowVisual);
+        }
     }
 
     private void EnsureDetectorHead()
@@ -103,6 +157,161 @@ public class DetectorVisualBuilder : MonoBehaviour
         headObject.transform.localPosition = new Vector3(0f, -0.45f, 0.95f);
         detectorHead = headObject.transform;
         metalDetector.detectorHead = detectorHead;
+    }
+
+    private void CacheShadowVisual()
+    {
+        if (shadowVisual != null)
+        {
+            return;
+        }
+
+        FirstPersonController ownerController = GetOwnerController();
+
+        if (ownerController == null)
+        {
+            return;
+        }
+
+        Transform foundShadow = FindChildByName(ownerController.transform, ShadowVisualName);
+
+        if (foundShadow == null)
+        {
+            foundShadow = FindUniqueSceneTransform(ShadowVisualName);
+        }
+
+        if (foundShadow != null && foundShadow != transform)
+        {
+            shadowVisual = foundShadow;
+        }
+    }
+
+    private void AttachShadowVisualToRightHand()
+    {
+        if (!Application.isPlaying || !attachShadowVisualToRightHand)
+        {
+            return;
+        }
+
+        if (activeHandAttachedDetector != null && activeHandAttachedDetector != this)
+        {
+            return;
+        }
+
+        CacheShadowVisual();
+
+        if (shadowVisual == null)
+        {
+            return;
+        }
+
+        Transform rightHand = GetPlayerRightHandAnchor();
+
+        if (rightHand == null)
+        {
+            return;
+        }
+
+        if (!shadowOffsetCaptured)
+        {
+            shadowHandLocalPositionOffset = rightHand.InverseTransformPoint(shadowVisual.position);
+            shadowHandLocalRotationOffset = Quaternion.Inverse(rightHand.rotation) * shadowVisual.rotation;
+            shadowOffsetCaptured = true;
+        }
+
+        activeHandAttachedDetector = this;
+
+        Vector3 targetPosition = rightHand.TransformPoint(shadowHandLocalPositionOffset);
+
+        if (rotateShadowVisualWithHand)
+        {
+            Quaternion targetRotation = rightHand.rotation * shadowHandLocalRotationOffset;
+            shadowVisual.SetPositionAndRotation(targetPosition, targetRotation);
+            return;
+        }
+
+        shadowVisual.position = targetPosition;
+    }
+
+    private void ApplyFirstPersonHolderVisibility()
+    {
+        if (!configureHolderAsFirstPersonOnly)
+        {
+            return;
+        }
+
+        Renderer[] renderers = GetComponentsInChildren<Renderer>(true);
+
+        foreach (Renderer renderer in renderers)
+        {
+            if (renderer == null || IsShadowVisualRenderer(renderer))
+            {
+                continue;
+            }
+
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+        }
+    }
+
+    private void ApplyShadowVisibility()
+    {
+        if (shadowVisual == null)
+        {
+            return;
+        }
+
+        Renderer[] renderers = shadowVisual.GetComponentsInChildren<Renderer>(true);
+
+        foreach (Renderer renderer in renderers)
+        {
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            renderer.enabled = true;
+            renderer.shadowCastingMode = renderShadowVisualMesh
+                ? UnityEngine.Rendering.ShadowCastingMode.On
+                : UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
+            renderer.receiveShadows = renderShadowVisualMesh;
+        }
+    }
+
+    private bool IsShadowVisualRenderer(Renderer renderer)
+    {
+        return shadowVisual != null && renderer.transform.IsChildOf(shadowVisual);
+    }
+
+    private FirstPersonController GetOwnerController()
+    {
+        return GetComponentInParent<FirstPersonController>();
+    }
+
+    private static Transform FindUniqueSceneTransform(string objectName)
+    {
+        Transform[] transforms = Resources.FindObjectsOfTypeAll<Transform>();
+        Transform uniqueTransform = null;
+
+        foreach (Transform candidate in transforms)
+        {
+            if (candidate == null
+                || candidate.name != objectName
+                || candidate.gameObject == null
+                || !candidate.gameObject.scene.IsValid())
+            {
+                continue;
+            }
+
+            if (uniqueTransform != null)
+            {
+                return null;
+            }
+
+            uniqueTransform = candidate;
+        }
+
+        return uniqueTransform;
     }
 
     private void CreateVisualRoot()
@@ -120,9 +329,14 @@ public class DetectorVisualBuilder : MonoBehaviour
         if (visualRoot != null)
         {
             visualRoot.SetParent(transform, false);
-            visualRoot.localPosition = rootOffset;
-            visualRoot.localRotation = Quaternion.identity;
-            visualRoot.localScale = Vector3.one;
+
+            if (!preserveExistingWorldDetectorTransform)
+            {
+                visualRoot.localPosition = rootOffset;
+                visualRoot.localRotation = Quaternion.identity;
+                visualRoot.localScale = Vector3.one;
+            }
+
             return;
         }
 
@@ -154,10 +368,16 @@ public class DetectorVisualBuilder : MonoBehaviour
 
     private void LoadDetectorModel()
     {
+        modelInstance = FindExistingDetectorModel();
+        RemoveDuplicateDetectorModels(modelInstance);
+
         if (modelInstance != null)
         {
-            KeepModelAttachedToVisualRoot();
+            worldModelTransformApplied = preserveExistingWorldDetectorTransform;
+            DisableModelColliders();
+            ApplyLocalVisibilityMode();
             EnsureFirstPersonModelLoaded();
+            RegisterDetectorScreens(true);
             return;
         }
 
@@ -171,15 +391,15 @@ public class DetectorVisualBuilder : MonoBehaviour
 
         modelInstance = Instantiate(detectorModel, visualRoot);
         modelInstance.name = "MetalDetector_Player";
-        modelInstance.transform.localPosition = modelLocalPosition;
-        modelInstance.transform.localRotation = Quaternion.Euler(modelLocalEulerAngles);
-        modelInstance.transform.localScale = modelLocalScale;
+        worldModelTransformApplied = false;
+        ApplyWorldModelDefaultTransform();
 
         DisableModelColliders();
         ApplyLocalVisibilityMode();
         AlignGripAnchorToHand();
         FitModelToView();
-        LoadFirstPersonModel(detectorModel);
+        EnsureFirstPersonModelLoaded();
+        RegisterDetectorScreens(true);
     }
 
     private void EnsureFirstPersonModelLoaded()
@@ -189,7 +409,17 @@ public class DetectorVisualBuilder : MonoBehaviour
             return;
         }
 
-        GameObject detectorModel = Resources.Load<GameObject>(modelResourcePath);
+        string resourcePath = string.IsNullOrWhiteSpace(firstPersonModelResourcePath)
+            ? modelResourcePath
+            : firstPersonModelResourcePath;
+        GameObject detectorModel = Resources.Load<GameObject>(resourcePath);
+
+        if (detectorModel == null)
+        {
+            Debug.LogWarning("Could not load first-person detector model from Resources/" + resourcePath + ".");
+            return;
+        }
+
         LoadFirstPersonModel(detectorModel);
     }
 
@@ -197,23 +427,16 @@ public class DetectorVisualBuilder : MonoBehaviour
     {
         gripAnchor = null;
 
-        if (firstPersonModelInstance != null)
-        {
-            DestroyDetectorObject(firstPersonModelInstance);
-            firstPersonModelInstance = null;
-        }
-
-        firstPersonTransformApplied = false;
-
         if (firstPersonModelParent != null)
         {
-            RemoveDuplicateFirstPersonModels(firstPersonModelParent, null);
+            RemoveDuplicateFirstPersonModels(firstPersonModelParent, firstPersonModelInstance);
         }
 
         if (modelInstance != null)
         {
             DestroyDetectorObject(modelInstance);
             modelInstance = null;
+            worldModelTransformApplied = false;
         }
 
         if (visualRoot == null)
@@ -274,18 +497,60 @@ public class DetectorVisualBuilder : MonoBehaviour
         if (firstPersonModelInstance != null)
         {
             firstPersonTransformApplied = true;
+            RemoveDuplicateFirstPersonModels(cameraTransform, firstPersonModelInstance);
+            DisableModelColliders(firstPersonModelInstance);
+            ApplyFirstPersonVisibilityMode();
+            RegisterDetectorScreens(true);
+            return;
         }
-        else
-        {
-            firstPersonModelInstance = Instantiate(detectorModel, cameraTransform);
-            firstPersonModelInstance.name = "MetalDetector_FirstPerson";
-            firstPersonTransformApplied = false;
-        }
+
+        firstPersonModelInstance = Instantiate(detectorModel, cameraTransform);
+        firstPersonModelInstance.name = "MetalDetector_FirstPerson";
+        firstPersonTransformApplied = false;
 
         RemoveDuplicateFirstPersonModels(cameraTransform, firstPersonModelInstance);
         KeepFirstPersonModelAttachedToCamera();
         DisableModelColliders(firstPersonModelInstance);
         ApplyFirstPersonVisibilityMode();
+        RegisterDetectorScreens(true);
+    }
+
+    private GameObject FindExistingDetectorModel()
+    {
+        if (visualRoot == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < visualRoot.childCount; i++)
+        {
+            Transform child = visualRoot.GetChild(i);
+
+            if (child.name == "MetalDetector_Player")
+            {
+                return child.gameObject;
+            }
+        }
+
+        return null;
+    }
+
+    private void RemoveDuplicateDetectorModels(GameObject modelToKeep)
+    {
+        if (visualRoot == null)
+        {
+            return;
+        }
+
+        for (int i = visualRoot.childCount - 1; i >= 0; i--)
+        {
+            Transform child = visualRoot.GetChild(i);
+
+            if (child.name == "MetalDetector_Player" && child.gameObject != modelToKeep)
+            {
+                DestroyDetectorObject(child.gameObject);
+            }
+        }
     }
 
     private void AlignGripAnchorToHand()
@@ -309,7 +574,12 @@ public class DetectorVisualBuilder : MonoBehaviour
 
     private void StickGripToPlayerRightHand()
     {
-        if (!stickGripToPlayerRightHand || modelInstance == null || string.IsNullOrEmpty(gripAnchorName))
+        if (!Application.isPlaying || !stickGripToPlayerRightHand || modelInstance == null || string.IsNullOrEmpty(gripAnchorName))
+        {
+            return;
+        }
+
+        if (activeHandAttachedDetector != null && activeHandAttachedDetector != this)
         {
             return;
         }
@@ -331,6 +601,8 @@ public class DetectorVisualBuilder : MonoBehaviour
             return;
         }
 
+        activeHandAttachedDetector = this;
+
         if (matchRightHandRotation)
         {
             Quaternion rotationDelta = rightHand.rotation * Quaternion.Inverse(gripAnchor.rotation);
@@ -342,7 +614,17 @@ public class DetectorVisualBuilder : MonoBehaviour
 
     private void KeepModelAttachedToVisualRoot()
     {
-        if (stickGripToPlayerRightHand || alignGripAnchorToHand || modelInstance == null)
+        if (stickGripToPlayerRightHand || alignGripAnchorToHand || modelInstance == null || worldModelTransformApplied)
+        {
+            return;
+        }
+
+        ApplyWorldModelDefaultTransform();
+    }
+
+    private void ApplyWorldModelDefaultTransform()
+    {
+        if (modelInstance == null)
         {
             return;
         }
@@ -350,6 +632,7 @@ public class DetectorVisualBuilder : MonoBehaviour
         modelInstance.transform.localPosition = modelLocalPosition;
         modelInstance.transform.localRotation = Quaternion.Euler(modelLocalEulerAngles);
         modelInstance.transform.localScale = modelLocalScale;
+        worldModelTransformApplied = true;
     }
 
     private void KeepFirstPersonModelAttachedToCamera()
@@ -365,7 +648,6 @@ public class DetectorVisualBuilder : MonoBehaviour
         {
             firstPersonModelParent = cameraTransform;
             firstPersonModelInstance.transform.SetParent(cameraTransform, false);
-            firstPersonTransformApplied = false;
         }
 
         if (firstPersonTransformApplied)
@@ -433,12 +715,28 @@ public class DetectorVisualBuilder : MonoBehaviour
 
     private Transform GetPlayerRightHandAnchor()
     {
-        if (localPlayerAvatarVisual == null)
+        FirstPersonController ownerController = GetComponentInParent<FirstPersonController>();
+
+        if (ownerController == null)
         {
-            localPlayerAvatarVisual = FindAnyObjectByType<LocalPlayerAvatarVisual>();
+            localPlayerAvatarVisual = null;
+            return null;
         }
 
-        return localPlayerAvatarVisual != null ? localPlayerAvatarVisual.RightHandAnchor : null;
+        LocalPlayerAvatarVisual ownerAvatarVisual = ownerController.GetComponent<LocalPlayerAvatarVisual>();
+
+        if (ownerAvatarVisual == null)
+        {
+            localPlayerAvatarVisual = null;
+            return null;
+        }
+
+        if (localPlayerAvatarVisual != ownerAvatarVisual)
+        {
+            localPlayerAvatarVisual = ownerAvatarVisual;
+        }
+
+        return localPlayerAvatarVisual.RightHandAnchor;
     }
 
     private void AlignScannerAnchorToDetectorHead()

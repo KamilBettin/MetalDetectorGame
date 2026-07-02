@@ -10,12 +10,16 @@ public class DiggingController : MonoBehaviour
     public TreasureMap treasureMap;
     public GameObject rustyShovelPrefab;
     public GameObject upgradedShovelPrefab;
+    public GameObject buriedChestPrefab;
+    public Material dugSandMaterial;
+    public Material dugSoilMaterial;
     public Vector3 rustyShovelLocalPosition = new Vector3(0f, 0.12f, 0f);
     public Vector3 rustyShovelLocalEulerAngles = new Vector3(-8f, 0f, 0f);
     public Vector3 rustyShovelLocalScale = Vector3.one * 0.24f;
     public Vector3 cleanShovelLocalPosition = Vector3.zero;
     public Vector3 cleanShovelLocalEulerAngles = new Vector3(-8f, 0f, 0f);
     public Vector3 cleanShovelLocalScale = Vector3.one * 1.16f;
+    public float chestSearchRange = 2f;
 
     private string lastFoundMessage = "";
     private float messageTimer;
@@ -23,6 +27,8 @@ public class DiggingController : MonoBehaviour
     private bool lastFoundWasTreasure;
     private string lastFoundItemName = "";
     private int lastFoundValue;
+    private int lastDigCurrentHits;
+    private int lastDigRequiredHits;
     private float nextDigAllowedTime;
 
     public string LastFoundMessage => lastFoundMessage;
@@ -31,8 +37,12 @@ public class DiggingController : MonoBehaviour
     public bool LastFoundWasTreasure => lastFoundWasTreasure;
     public string LastFoundItemName => lastFoundItemName;
     public int LastFoundValue => lastFoundValue;
+    public int LastDigCurrentHits => lastDigCurrentHits;
+    public int LastDigRequiredHits => lastDigRequiredHits;
+    public float LastDigProgress01 => lastDigRequiredHits > 0 ? Mathf.Clamp01(lastDigCurrentHits / (float)lastDigRequiredHits) : 0f;
 
     public bool HasDigTargetInRange => FindClosestTreasureInRange() != null;
+    public bool HasSearchableChestInRange => FindClosestSearchableChestInRange() != null;
 
     private void Awake()
     {
@@ -58,12 +68,15 @@ public class DiggingController : MonoBehaviour
     {
         if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame)
         {
-            if (GameUIState.AnyMenuOpen || (upgradeShop != null && upgradeShop.IsPlayerNearShop()) || PlayerHome.AnyHomeInteractionInRange())
+            if (GameUIState.AnyMenuOpen || (upgradeShop != null && upgradeShop.IsPlayerNearShop()) || PlayerHome.AnyHomeInteractionInRange() || NpcQuestGiver.AnyQuestGiverInteractionInRange())
             {
                 return;
             }
 
-            TryDig();
+            if (!TrySearchReadyChest())
+            {
+                TryDig();
+            }
         }
 
         if (messageTimer > 0f)
@@ -86,6 +99,7 @@ public class DiggingController : MonoBehaviour
             lastFoundWasTreasure = false;
             lastFoundItemName = "";
             lastFoundValue = 0;
+            ClearDigProgress();
             messageTimer = 2.4f;
             return;
         }
@@ -100,46 +114,87 @@ public class DiggingController : MonoBehaviour
             lastFoundWasTreasure = false;
             lastFoundItemName = "";
             lastFoundValue = 0;
+            ClearDigProgress();
             messageTimer = 2f;
             return;
         }
 
         bool digComplete = treasure.DigOnce();
+        DigSiteVisual digSite = UpdateDigSite(treasure);
 
         if (!digComplete)
         {
             StartDigCooldown(PlayDigVisual(treasure, false));
             lastFoundMessage = "Digging: " + treasure.currentDigHits + "/" + treasure.requiredDigHits;
-            lastFoundIcon = treasure.icon;
+            lastFoundIcon = null;
             lastFoundWasTreasure = false;
-            lastFoundItemName = treasure.treasureName;
-            lastFoundValue = treasure.value;
+            lastFoundItemName = "";
+            lastFoundValue = 0;
+            lastDigCurrentHits = treasure.currentDigHits;
+            lastDigRequiredHits = treasure.requiredDigHits;
             messageTimer = 1.5f;
             return;
         }
 
+        StartDigCooldown(PlayDigVisual(treasure, true));
+        PrepareSearchableChest(treasure, digSite);
+    }
+
+    private bool TrySearchReadyChest()
+    {
+        if (IsDigCooldownActive())
+        {
+            return false;
+        }
+
+        DetectableTreasure treasure = FindClosestSearchableChestInRange();
+
+        if (treasure == null)
+        {
+            return false;
+        }
+
+        SearchChest(treasure);
+        return true;
+    }
+
+    private void SearchChest(DetectableTreasure treasure)
+    {
         if (!playerInventory.AddTreasure(treasure))
         {
-            lastFoundMessage = "Backpack is full. Sell items or buy an upgrade.";
-            lastFoundIcon = treasure.icon;
+            lastFoundMessage = "Backpack is full. Make room, then search the chest.";
+            lastFoundIcon = null;
             lastFoundWasTreasure = false;
-            lastFoundItemName = treasure.treasureName;
-            lastFoundValue = treasure.value;
+            lastFoundItemName = "";
+            lastFoundValue = 0;
+            ClearDigProgress();
             messageTimer = 3f;
             return;
         }
 
         treasure.isFound = true;
         treasureMap.RegisterFoundTreasure(treasure.transform.position);
-        StartDigCooldown(PlayDigVisual(treasure, true));
-        ReplaceRevealMarkerWithDugSpot(treasure);
+
+        DigSiteVisual digSite = DigSiteVisual.FindForTreasure(treasure);
+
+        if (digSite != null)
+        {
+            digSite.MarkSearched();
+        }
+
         lastFoundMessage = "Found: " + treasure.treasureName + " ($" + treasure.value + ")!";
         lastFoundIcon = treasure.icon;
         lastFoundWasTreasure = true;
         lastFoundItemName = treasure.treasureName;
         lastFoundValue = treasure.value;
+        ClearDigProgress();
         messageTimer = GetFoundMessageDuration(treasure.value);
         GameEvents.ReportTreasureFound(treasure);
+
+        if (treasure.revealMarker != null)
+        {
+            Destroy(treasure.revealMarker.gameObject);
+        }
 
         Renderer treasureRenderer = treasure.GetComponent<Renderer>();
 
@@ -156,7 +211,76 @@ public class DiggingController : MonoBehaviour
         }
     }
 
+    private void PrepareSearchableChest(DetectableTreasure treasure, DigSiteVisual digSite)
+    {
+        if (digSite != null)
+        {
+            digSite.SetProgress(1f);
+        }
+
+        if (treasure.revealMarker != null)
+        {
+            Destroy(treasure.revealMarker.gameObject);
+        }
+
+        Renderer treasureRenderer = treasure.GetComponent<Renderer>();
+
+        if (treasureRenderer != null)
+        {
+            treasureRenderer.enabled = false;
+        }
+
+        Collider treasureCollider = treasure.GetComponent<Collider>();
+
+        if (treasureCollider != null)
+        {
+            treasureCollider.enabled = false;
+        }
+
+        lastFoundMessage = "Chest exposed. Press E to search.";
+        lastFoundIcon = null;
+        lastFoundWasTreasure = false;
+        lastFoundItemName = "";
+        lastFoundValue = 0;
+        ClearDigProgress();
+        messageTimer = 2.4f;
+    }
+
+    private void ClearDigProgress()
+    {
+        lastDigCurrentHits = 0;
+        lastDigRequiredHits = 0;
+    }
+
     public DetectableTreasure FindClosestTreasureInRange()
+    {
+        return FindClosestTreasureInRange(digRange, false);
+    }
+
+    public DetectableTreasure FindClosestSearchableChestInRange()
+    {
+        return FindClosestTreasureInRange(chestSearchRange, true);
+    }
+
+    public Vector3 GetChestPromptPosition(DetectableTreasure treasure)
+    {
+        DigSiteVisual digSite = DigSiteVisual.FindForTreasure(treasure);
+
+        if (digSite != null)
+        {
+            return digSite.PromptPosition;
+        }
+
+        return GetDigSitePosition(treasure) + Vector3.up * 0.85f;
+    }
+
+    public Transform GetChestHighlightTarget(DetectableTreasure treasure)
+    {
+        DigSiteVisual digSite = DigSiteVisual.FindForTreasure(treasure);
+        return digSite != null ? digSite.HighlightTarget : treasure != null ? treasure.transform : null;
+    }
+
+    private DetectableTreasure FindClosestTreasureInRange(float range, bool requireSearchableChest)
     {
         if (DayNightCycle.IsNightNow)
         {
@@ -165,7 +289,7 @@ public class DiggingController : MonoBehaviour
 
         DetectableTreasure[] treasures = FindObjectsByType<DetectableTreasure>();
         DetectableTreasure closestTreasure = null;
-        float closestDistance = digRange;
+        float closestDistance = range;
 
         foreach (DetectableTreasure treasure in treasures)
         {
@@ -179,6 +303,13 @@ public class DiggingController : MonoBehaviour
                 continue;
             }
 
+            bool searchableChest = IsSearchableChest(treasure);
+
+            if (searchableChest != requireSearchableChest)
+            {
+                continue;
+            }
+
             float distance = GetGroundDistance(transform.position, treasure.transform.position);
 
             if (distance < closestDistance)
@@ -188,7 +319,41 @@ public class DiggingController : MonoBehaviour
             }
         }
 
+        if (closestTreasure != null && closestTreasure.currentDigHits > 0)
+        {
+            UpdateDigSite(closestTreasure);
+        }
+
         return closestTreasure;
+    }
+
+    private bool IsSearchableChest(DetectableTreasure treasure)
+    {
+        return treasure != null && treasure.isRevealed && !treasure.isFound && treasure.IsDugUp;
+    }
+
+    private DigSiteVisual UpdateDigSite(DetectableTreasure treasure)
+    {
+        if (treasure == null)
+        {
+            return null;
+        }
+
+        DigSiteVisual digSite = DigSiteVisual.EnsureForTreasure(treasure, GetDigSitePosition(treasure), buriedChestPrefab, dugSandMaterial, dugSoilMaterial);
+        digSite.SetProgress(treasure.DigProgress01);
+        return digSite;
+    }
+
+    private Vector3 GetDigSitePosition(DetectableTreasure treasure)
+    {
+        Vector3 markerPosition = treasure.transform.position;
+
+        if (treasure.revealMarker != null)
+        {
+            markerPosition = treasure.revealMarker.transform.position;
+        }
+
+        return new Vector3(markerPosition.x, GetSurfaceY(markerPosition), markerPosition.z);
     }
 
     private float GetGroundDistance(Vector3 firstPosition, Vector3 secondPosition)
@@ -226,39 +391,6 @@ public class DiggingController : MonoBehaviour
         }
 
         return 3.2f;
-    }
-
-    private void ReplaceRevealMarkerWithDugSpot(DetectableTreasure treasure)
-    {
-        Vector3 markerPosition = treasure.transform.position;
-
-        if (treasure.revealMarker != null)
-        {
-            markerPosition = treasure.revealMarker.transform.position;
-            Destroy(treasure.revealMarker.gameObject);
-        }
-
-        GameObject dugSpotObject = new GameObject("Dug Ground");
-        dugSpotObject.transform.position = new Vector3(markerPosition.x, GetSurfaceY(markerPosition), markerPosition.z);
-
-        GameObject darkCenter = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        darkCenter.name = "Dug Hole Dark Center";
-        darkCenter.transform.SetParent(dugSpotObject.transform, false);
-        darkCenter.transform.localPosition = new Vector3(0f, 0.012f, 0f);
-        darkCenter.transform.localScale = new Vector3(0.78f, 0.026f, 0.66f);
-        AssignDugSpotMaterial(darkCenter, new Color(0.13f, 0.075f, 0.035f, 0.92f));
-        DisableCollider(darkCenter);
-
-        GameObject innerShadow = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        innerShadow.name = "Dug Hole Inner Shadow";
-        innerShadow.transform.SetParent(dugSpotObject.transform, false);
-        innerShadow.transform.localPosition = new Vector3(0f, 0.028f, 0f);
-        innerShadow.transform.localScale = new Vector3(0.52f, 0.018f, 0.42f);
-        AssignDugSpotMaterial(innerShadow, new Color(0.045f, 0.028f, 0.018f, 0.95f));
-        DisableCollider(innerShadow);
-
-        CreateDugSandRim(dugSpotObject.transform);
-
     }
 
     private float GetSurfaceY(Vector3 worldPosition)
@@ -331,88 +463,13 @@ public class DiggingController : MonoBehaviour
 
         foreach (UpgradeShop candidate in shops)
         {
-            if (candidate != null && candidate.shopNpc != null)
+            if (candidate != null && candidate.shopNpc != null && candidate.CanUpgradeHere)
             {
                 return candidate;
             }
         }
 
         return shops.Length > 0 ? shops[0] : null;
-    }
-
-    private void CreateDugSandRim(Transform parent)
-    {
-        Color rimColor = new Color(0.63f, 0.48f, 0.25f, 1f);
-        Color highlightColor = new Color(0.82f, 0.68f, 0.38f, 1f);
-        int count = 14;
-
-        for (int i = 0; i < count; i++)
-        {
-            float angle = i / (float)count * Mathf.PI * 2f;
-            float wobble = i % 2 == 0 ? 1.04f : 0.92f;
-            Vector3 position = new Vector3(Mathf.Cos(angle) * 0.58f * wobble, 0.052f, Mathf.Sin(angle) * 0.47f * wobble);
-
-            GameObject rimChunk = GameObject.CreatePrimitive(i % 3 == 0 ? PrimitiveType.Cube : PrimitiveType.Sphere);
-            rimChunk.name = "Dug Sand Rim";
-            rimChunk.transform.SetParent(parent, false);
-            rimChunk.transform.localPosition = position;
-            rimChunk.transform.localRotation = Quaternion.Euler(0f, -angle * Mathf.Rad2Deg, 0f);
-            rimChunk.transform.localScale = new Vector3(0.18f + (i % 4) * 0.018f, 0.045f, 0.12f + (i % 5) * 0.012f);
-            AssignDugSpotMaterial(rimChunk, i % 4 == 0 ? highlightColor : rimColor);
-            DisableCollider(rimChunk);
-        }
-
-        for (int i = 0; i < 5; i++)
-        {
-            float angle = (i * 1.37f + 0.4f) * Mathf.PI;
-            GameObject looseChunk = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            looseChunk.name = "Loose Dug Sand";
-            looseChunk.transform.SetParent(parent, false);
-            looseChunk.transform.localPosition = new Vector3(Mathf.Cos(angle) * 0.86f, 0.055f, Mathf.Sin(angle) * 0.72f);
-            looseChunk.transform.localScale = Vector3.one * (0.055f + i * 0.007f);
-            AssignDugSpotMaterial(looseChunk, rimColor);
-            DisableCollider(looseChunk);
-        }
-    }
-
-    private void AssignDugSpotMaterial(GameObject target, Color color)
-    {
-        Renderer targetRenderer = target.GetComponent<Renderer>();
-
-        if (targetRenderer != null)
-        {
-            targetRenderer.material = CreateDugSpotMaterial(color);
-        }
-    }
-
-    private Material CreateDugSpotMaterial(Color color)
-    {
-        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-
-        if (shader == null)
-        {
-            shader = Shader.Find("Standard");
-        }
-
-        Material material = new Material(shader);
-        material.color = color;
-
-        if (material.HasProperty("_BaseColor"))
-        {
-            material.SetColor("_BaseColor", color);
-        }
-
-        return material;
-    }
-
-    private void DisableCollider(GameObject target)
-    {
-        Collider targetCollider = target.GetComponent<Collider>();
-
-        if (targetCollider != null)
-        {
-            targetCollider.enabled = false;
-        }
     }
 
     private void OnGUI()
@@ -424,9 +481,11 @@ public class DiggingController : MonoBehaviour
 
         if (!GameUIState.AnyMenuOpen)
         {
-            string prompt = HasDigTargetInRange
-                ? "E - Dig"
-                : "Hold LMB to scan sand.";
+            string prompt = HasSearchableChestInRange
+                ? "E - Search"
+                : HasDigTargetInRange
+                    ? "E - Dig"
+                    : "Hold LMB to scan sand.";
             GameGui.DrawToast(new Rect(Screen.width * 0.5f - 190f, Screen.height - 74f, 380f, 42f), prompt);
         }
 

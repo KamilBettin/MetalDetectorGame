@@ -1,12 +1,23 @@
+using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 
 public static class DefaultSearchAreaBootstrapper
 {
     private const string BasicAreaName = "Basic Ground";
     private const string BasicAreaRootName = "Search Area - Basic Ground";
+    private const string StylizedSignTextResourcePath = "StylizedWoodenSign/source/StylizedWoodenSign_Text 1";
+    private const string StylizedSignResourcePath = "StylizedWoodenSign/source/wooden sign";
+    private const string StylizedSignMaterialResourcePath = "StylizedWoodenSign/Materials/StylizedWoodenSign";
+    private const string AreaSignLabel = "Darmowa\nDupcia";
+    private const float StylizedSignUprightPitch = 90f;
+    private const float PlacedStylizedSignYaw = 155f;
+    private const float StylizedSignGroundClearance = 0.03f;
     private const float SignOffsetOutsideArea = 2f;
-    private const float PlayerSpawnOffsetInsideArea = 6f;
-    private const float PlayerSpawnHeightOffset = 1.1f;
+    private const float SignTextSurfaceOffset = 0.024f;
+    private const float AnchoredSignTextHeightRatio = 0.72f;
+    private const float AnchoredSignTextMinHeight = 0.52f;
+    private const float AnchoredSignTextMaxHeight = 0.9f;
     private const float BoundarySegmentLength = 1.25f;
     private const float BoundaryThickness = 0.42f;
     private const float BoundaryHeight = 0.035f;
@@ -14,19 +25,102 @@ public static class DefaultSearchAreaBootstrapper
 
     private static readonly Vector2 BasicAreaMin = new Vector2(-770f, -730f);
     private static readonly Vector2 BasicAreaMax = new Vector2(-720f, -680f);
-    private static readonly Vector2 BeachSpawnPosition = new Vector2(-920f, -720f);
-    private static bool movedPlayerToBasicArea;
 
     public static void EnsureDefaultSearchAreas()
     {
+        EnsurePlacedStylizedSignText();
+        ConvertExistingSignTextsToTmp();
+
         bool hasBasicArea = HasSearchArea(BasicAreaName) || GameObject.Find(BasicAreaRootName) != null;
 
         if (!hasBasicArea)
         {
             CreateBasicGroundArea();
         }
+    }
 
-        MovePlayerToBasicAreaSpawn();
+    public static int ConvertExistingSignTextsToTmp()
+    {
+        int convertedCount = 0;
+        TextMesh[] legacyTexts = Object.FindObjectsByType<TextMesh>(FindObjectsInactive.Include);
+
+        foreach (TextMesh legacyText in legacyTexts)
+        {
+            if (legacyText == null || !IsSignTextObject(legacyText.gameObject))
+            {
+                continue;
+            }
+
+            GameObject textObject = legacyText.gameObject;
+            Transform textTransform = textObject.transform;
+            string label = NormalizeSignLabel(legacyText.text);
+
+            if (!TryApplyAnchoredTextLayout(textTransform, out Vector2 textBoxSize))
+            {
+                float textScale = Mathf.Clamp(legacyText.characterSize * 1.8f, 0.075f, 0.18f);
+                textTransform.localScale = Vector3.one * textScale;
+                textTransform.position += textTransform.forward * SignTextSurfaceOffset;
+                textBoxSize = new Vector2(8f, 3f);
+            }
+
+            DestroyComponent(legacyText);
+
+            TextMeshPro text = EnsureTextMeshPro(textObject);
+
+            ConfigureSignText(text, label, textBoxSize, 1f, true);
+            convertedCount++;
+        }
+
+        TextMeshPro[] tmpTexts = Object.FindObjectsByType<TextMeshPro>(FindObjectsInactive.Include);
+
+        foreach (TextMeshPro tmpText in tmpTexts)
+        {
+            if (tmpText == null || !IsSignTextObject(tmpText.gameObject))
+            {
+                continue;
+            }
+
+            if (TryApplyAnchoredTextLayout(tmpText.transform, out Vector2 textBoxSize))
+            {
+                ConfigureSignText(tmpText, tmpText.text, textBoxSize, GetAnchoredFontSizeMax(textBoxSize), true);
+            }
+        }
+
+        return convertedCount;
+    }
+
+    private static void EnsurePlacedStylizedSignText()
+    {
+        GameObject placedSign = GameObject.Find("StylizedWoodenSign_Scene");
+
+        if (placedSign == null)
+        {
+            return;
+        }
+
+        if (!HasTextAnchors(placedSign.transform))
+        {
+            placedSign.transform.rotation = Quaternion.Euler(StylizedSignUprightPitch, PlacedStylizedSignYaw, 0f);
+        }
+
+        Transform placedBackText = placedSign.transform.Find("Sign Text Back");
+
+        if (placedBackText != null)
+        {
+            DestroyGameObject(placedBackText.gameObject);
+        }
+
+        if (ApplyAnchoredSignText(placedSign.transform, AreaSignLabel))
+        {
+            return;
+        }
+
+        if (placedSign.transform.Find("Sign Text Front") != null)
+        {
+            return;
+        }
+
+        CreateSignText(placedSign.transform, AreaSignLabel, new Vector3(0f, 0.09f, 1.55f), Quaternion.Euler(-StylizedSignUprightPitch, 0f, 0f));
     }
 
     private static bool HasSearchArea(string areaName)
@@ -75,7 +169,7 @@ public static class DefaultSearchAreaBootstrapper
             areaObject.transform,
             signPosition,
             centerPosition,
-            "BASIC\nGROUND\nFREE",
+            AreaSignLabel,
             postMaterial,
             boardMaterial
         );
@@ -89,7 +183,7 @@ public static class DefaultSearchAreaBootstrapper
             areaObject.transform,
             signPosition,
             centerPosition,
-            "BASIC\nGROUND\nOWNED",
+            AreaSignLabel,
             postMaterial,
             boardMaterial
         );
@@ -99,64 +193,6 @@ public static class DefaultSearchAreaBootstrapper
         area.unlockedObjects = new[] { unlockedMarker, ownedSign };
 
         Debug.Log("Created Basic Ground search area at " + centerPosition + ".");
-    }
-
-    private static void MovePlayerToBasicAreaSpawn()
-    {
-        if (movedPlayerToBasicArea)
-        {
-            return;
-        }
-
-        FirstPersonController firstPersonController = Object.FindAnyObjectByType<FirstPersonController>();
-        Transform player = firstPersonController != null ? firstPersonController.transform : null;
-
-        if (player == null)
-        {
-            PlayerInventory playerInventory = Object.FindAnyObjectByType<PlayerInventory>();
-            player = playerInventory != null ? playerInventory.transform : null;
-        }
-
-        if (player == null)
-        {
-            return;
-        }
-
-        Vector2 center = (BasicAreaMin + BasicAreaMax) * 0.5f;
-        Vector3 signFlatPosition = new Vector3(center.x, 0f, center.y);
-        Vector3 spawnPosition = new Vector3(BeachSpawnPosition.x, 0f, BeachSpawnPosition.y);
-        spawnPosition.y = GetGroundY(spawnPosition.x, spawnPosition.z) + PlayerSpawnHeightOffset;
-
-        CharacterController characterController = player.GetComponent<CharacterController>();
-        bool wasControllerEnabled = characterController != null && characterController.enabled;
-
-        if (wasControllerEnabled)
-        {
-            characterController.enabled = false;
-        }
-
-        player.position = spawnPosition;
-
-        Vector3 lookDirection = signFlatPosition - spawnPosition;
-        lookDirection.y = 0f;
-
-        if (lookDirection.sqrMagnitude > 0.01f)
-        {
-            player.rotation = Quaternion.LookRotation(lookDirection.normalized, Vector3.up);
-        }
-
-        if (firstPersonController != null && firstPersonController.playerCamera != null)
-        {
-            firstPersonController.playerCamera.localRotation = Quaternion.identity;
-        }
-
-        if (wasControllerEnabled)
-        {
-            characterController.enabled = true;
-        }
-
-        movedPlayerToBasicArea = true;
-        Debug.Log("Moved player next to Basic Ground purchase sign at " + spawnPosition + ".");
     }
 
     private static GameObject CreateAreaBoundary(string name, Transform parent, Vector2 center, Vector2 size, Material material)
@@ -254,6 +290,11 @@ public static class DefaultSearchAreaBootstrapper
             sign.transform.rotation = Quaternion.LookRotation(forward.normalized, Vector3.up);
         }
 
+        if (CreateStylizedSign(sign.transform, label))
+        {
+            return sign;
+        }
+
         GameObject post = GameObject.CreatePrimitive(PrimitiveType.Cube);
         post.name = "Post";
         post.transform.SetParent(sign.transform);
@@ -273,27 +314,480 @@ public static class DefaultSearchAreaBootstrapper
         DisableCollider(board);
 
         CreateSignText(sign.transform, label, new Vector3(0f, 1.55f, 0.076f), Quaternion.Euler(0f, 180f, 0f));
-        CreateSignText(sign.transform, label, new Vector3(0f, 1.55f, -0.076f), Quaternion.identity);
 
         return sign;
     }
 
+    private static bool CreateStylizedSign(Transform parent, string label)
+    {
+        GameObject signPrefab = Resources.Load<GameObject>(StylizedSignTextResourcePath);
+        bool usesTextAnchors = signPrefab != null;
+
+        if (signPrefab == null)
+        {
+            signPrefab = Resources.Load<GameObject>(StylizedSignResourcePath);
+        }
+
+        if (signPrefab == null)
+        {
+            return false;
+        }
+
+        GameObject signModel = Object.Instantiate(signPrefab, parent);
+        signModel.name = "Stylized Sign Model";
+        signModel.transform.localPosition = Vector3.zero;
+        signModel.transform.localScale = Vector3.one;
+
+        if (!usesTextAnchors)
+        {
+            signModel.transform.localRotation = Quaternion.Euler(StylizedSignUprightPitch, 0f, 0f);
+        }
+
+        LiftRenderableToGround(signModel.transform, parent.position.y + StylizedSignGroundClearance);
+
+        Material signMaterial = usesTextAnchors ? null : Resources.Load<Material>(StylizedSignMaterialResourcePath);
+
+        if (!usesTextAnchors && signMaterial != null)
+        {
+            foreach (Renderer renderer in signModel.GetComponentsInChildren<Renderer>(true))
+            {
+                Material[] materials = renderer.sharedMaterials;
+
+                for (int i = 0; i < materials.Length; i++)
+                {
+                    materials[i] = signMaterial;
+                }
+
+                renderer.sharedMaterials = materials;
+            }
+        }
+
+        foreach (Collider collider in signModel.GetComponentsInChildren<Collider>(true))
+        {
+            collider.enabled = false;
+        }
+
+        if (!ApplyAnchoredSignText(signModel.transform, label))
+        {
+            CreateSignText(parent, label, new Vector3(0f, 1.55f, 0.09f), Quaternion.identity);
+        }
+
+        return true;
+    }
+
     private static void CreateSignText(Transform parent, string label, Vector3 localPosition, Quaternion localRotation)
     {
-        GameObject textObject = new GameObject("Text");
+        bool facesBackward = Mathf.Abs(Mathf.DeltaAngle(localRotation.eulerAngles.y, 180f)) < 1f;
+        GameObject textObject = new GameObject(facesBackward ? "Sign Text Back" : "Sign Text Front");
         textObject.transform.SetParent(parent);
         textObject.transform.localPosition = localPosition;
         textObject.transform.localRotation = localRotation;
-        textObject.transform.localScale = Vector3.one;
+        textObject.transform.localScale = Vector3.one * 0.16f;
 
-        TextMesh text = textObject.AddComponent<TextMesh>();
-        text.text = label;
-        text.anchor = TextAnchor.MiddleCenter;
-        text.alignment = TextAlignment.Center;
-        text.characterSize = 0.115f;
-        text.fontSize = 52;
-        text.lineSpacing = 0.86f;
-        text.color = new Color(0.08f, 0.055f, 0.025f, 1f);
+        TextMeshPro text = EnsureTextMeshPro(textObject);
+        ConfigureSignText(text, label, new Vector2(8f, 3f), 1f);
+    }
+
+    private static bool ApplyAnchoredSignText(Transform signRoot, string label)
+    {
+        Transform textStart = FindDeepChild(signRoot, "Text");
+        Transform textEnd = FindDeepChild(signRoot, "TextEnd");
+
+        if (textStart == null || textEnd == null || textStart.parent == null || textStart.parent != textEnd.parent)
+        {
+            return false;
+        }
+
+        DestroyChild(signRoot, "Sign Text Front");
+        DestroyChild(signRoot, "Sign Text Back");
+
+        Transform textParent = textStart.parent;
+        Vector3 delta = textEnd.localPosition - textStart.localPosition;
+
+        if (delta.sqrMagnitude < 0.0001f)
+        {
+            return false;
+        }
+
+        GameObject textObject = new GameObject("Sign Text Front");
+        textObject.transform.SetParent(textParent);
+        Vector2 textBoxSize = GetAnchoredTextBoxSize(delta);
+        ApplyAnchoredTextTransform(textObject.transform, textStart, textEnd);
+
+        TextMeshPro text = EnsureTextMeshPro(textObject);
+        ConfigureSignText(text, label, textBoxSize, GetAnchoredFontSizeMax(textBoxSize), true);
+
+        return true;
+    }
+
+    private static TextMeshPro EnsureTextMeshPro(GameObject textObject)
+    {
+        if (textObject == null)
+        {
+            return null;
+        }
+
+        if (textObject.GetComponent<MeshRenderer>() == null)
+        {
+            textObject.AddComponent<MeshRenderer>();
+        }
+
+        TextMeshPro text = textObject.GetComponent<TextMeshPro>();
+
+        if (text == null)
+        {
+            text = textObject.AddComponent<TextMeshPro>();
+        }
+
+        EnsureTextFont(text);
+        return text;
+    }
+
+    private static void EnsureTextFont(TextMeshPro text)
+    {
+        if (text == null)
+        {
+            return;
+        }
+
+        if (text.font == null)
+        {
+            TMP_FontAsset defaultFont = TMP_Settings.defaultFontAsset;
+
+            if (defaultFont == null)
+            {
+                defaultFont = Resources.Load<TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
+            }
+
+            if (defaultFont != null)
+            {
+                text.font = defaultFont;
+            }
+        }
+
+        if (GetSafeSharedMaterial(text) == null && text.font != null && text.font.material != null)
+        {
+            text.fontSharedMaterial = text.font.material;
+        }
+    }
+
+    private static void ConfigureSignText(TextMeshPro text, string label, Vector2 textBoxSize, float fontSize, bool fitToBox = false)
+    {
+        if (text == null)
+        {
+            return;
+        }
+
+        text.text = NormalizeSignLabel(label);
+        text.alignment = TextAlignmentOptions.Center;
+        text.fontStyle = FontStyles.Bold;
+        text.fontSize = fontSize;
+        text.enableAutoSizing = fitToBox;
+        text.fontSizeMin = fitToBox ? Mathf.Max(0.05f, fontSize * 0.25f) : fontSize;
+        text.fontSizeMax = fitToBox ? fontSize : fontSize;
+        text.textWrappingMode = TextWrappingModes.NoWrap;
+        text.overflowMode = TextOverflowModes.Overflow;
+        text.lineSpacing = -8f;
+        text.characterSpacing = 0f;
+        text.extraPadding = true;
+        text.enableCulling = false;
+        text.color = new Color(1f, 0.86f, 0.42f, 1f);
+        text.margin = Vector4.zero;
+        text.rectTransform.sizeDelta = textBoxSize;
+        ApplyReadableTmpMaterial(text);
+
+        MeshRenderer renderer = text.GetComponent<MeshRenderer>();
+
+        if (renderer != null)
+        {
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            renderer.sortingOrder = 30;
+        }
+
+        text.ForceMeshUpdate();
+    }
+
+    private static bool IsSignTextObject(GameObject textObject)
+    {
+        if (textObject == null)
+        {
+            return false;
+        }
+
+        return textObject.name == "Sign Text Front" || textObject.name == "Sign Text Back";
+    }
+
+    private static string NormalizeSignLabel(string label)
+    {
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            return AreaSignLabel;
+        }
+
+        string[] rawLines = label.Replace("\r", "\n").Split('\n');
+        List<string> lines = new List<string>();
+
+        foreach (string rawLine in rawLines)
+        {
+            string trimmedLine = rawLine.Trim();
+
+            if (!string.IsNullOrEmpty(trimmedLine))
+            {
+                lines.Add(trimmedLine);
+            }
+        }
+
+        return lines.Count > 0 ? string.Join("\n", lines) : AreaSignLabel;
+    }
+
+    private static bool TryApplyAnchoredTextLayout(Transform textTransform, out Vector2 textBoxSize)
+    {
+        textBoxSize = new Vector2(8f, 3f);
+
+        if (textTransform == null || textTransform.parent == null)
+        {
+            return false;
+        }
+
+        Transform textStart = FindDeepChild(textTransform.parent, "Text");
+        Transform textEnd = FindDeepChild(textTransform.parent, "TextEnd");
+
+        if (textStart == null || textEnd == null || textStart.parent != textEnd.parent)
+        {
+            return false;
+        }
+
+        Vector3 delta = textEnd.localPosition - textStart.localPosition;
+
+        if (delta.sqrMagnitude < 0.0001f)
+        {
+            return false;
+        }
+
+        ApplyAnchoredTextTransform(textTransform, textStart, textEnd);
+        textBoxSize = GetAnchoredTextBoxSize(delta);
+        return true;
+    }
+
+    private static void ApplyAnchoredTextTransform(Transform textTransform, Transform textStart, Transform textEnd)
+    {
+        textTransform.localPosition = (textStart.localPosition + textEnd.localPosition) * 0.5f;
+        textTransform.rotation = Quaternion.Euler(0f, textStart.rotation.eulerAngles.y, 0f);
+        textTransform.localScale = Vector3.one;
+        textTransform.position += textTransform.forward * SignTextSurfaceOffset;
+    }
+
+    private static Vector2 GetAnchoredTextBoxSize(Vector3 anchorDelta)
+    {
+        float width = Mathf.Max(0.01f, anchorDelta.magnitude);
+        float height = Mathf.Clamp(width * AnchoredSignTextHeightRatio, AnchoredSignTextMinHeight, AnchoredSignTextMaxHeight);
+        return new Vector2(width, height);
+    }
+
+    private static float GetAnchoredFontSizeMax(Vector2 textBoxSize)
+    {
+        return Mathf.Clamp(Mathf.Min(textBoxSize.x * 0.42f, textBoxSize.y * 0.52f), 0.22f, 0.58f);
+    }
+
+    private static void ApplyReadableTmpMaterial(TextMeshPro text)
+    {
+        if (text == null)
+        {
+            return;
+        }
+
+        EnsureTextFont(text);
+        Material sourceMaterial = GetSafeSharedMaterial(text);
+
+        if (sourceMaterial == null)
+        {
+            return;
+        }
+
+        Material readableMaterial = new Material(sourceMaterial);
+        readableMaterial.name = "Readable Sign Text TMP";
+        SetMaterialColor(readableMaterial, new Color(1f, 0.86f, 0.32f, 1f), "_FaceColor", "_Color");
+        SetMaterialColor(readableMaterial, Color.black, "_OutlineColor", "_UnderlayColor");
+        SetMaterialFloat(readableMaterial, 0.34f, "_OutlineWidth");
+        SetMaterialFloat(readableMaterial, 0.62f, "_FaceDilate");
+        SetMaterialFloat(readableMaterial, 0.18f, "_UnderlayOffsetX");
+        SetMaterialFloat(readableMaterial, -0.18f, "_UnderlayOffsetY");
+        SetMaterialFloat(readableMaterial, 0.08f, "_UnderlaySoftness");
+        readableMaterial.EnableKeyword("OUTLINE_ON");
+        readableMaterial.EnableKeyword("UNDERLAY_ON");
+        text.fontSharedMaterial = readableMaterial;
+    }
+
+    private static Material GetSafeSharedMaterial(TextMeshPro text)
+    {
+        if (text == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            if (text.fontSharedMaterial != null)
+            {
+                return text.fontSharedMaterial;
+            }
+        }
+        catch (UnassignedReferenceException)
+        {
+        }
+
+        return text.font != null ? text.font.material : null;
+    }
+
+    private static void SetMaterialColor(Material material, Color color, params string[] propertyNames)
+    {
+        foreach (string propertyName in propertyNames)
+        {
+            if (material.HasProperty(propertyName))
+            {
+                material.SetColor(propertyName, color);
+            }
+        }
+    }
+
+    private static void SetMaterialFloat(Material material, float value, params string[] propertyNames)
+    {
+        foreach (string propertyName in propertyNames)
+        {
+            if (material.HasProperty(propertyName))
+            {
+                material.SetFloat(propertyName, value);
+            }
+        }
+    }
+
+    private static void LiftRenderableToGround(Transform root, float targetBottomY)
+    {
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+        bool hasBounds = false;
+        Bounds bounds = default;
+
+        foreach (Renderer renderer in renderers)
+        {
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        if (!hasBounds)
+        {
+            return;
+        }
+
+        float lift = targetBottomY - bounds.min.y;
+        root.position += Vector3.up * lift;
+    }
+
+    private static int GetLongestLineLength(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return 1;
+        }
+
+        int longest = 0;
+        int current = 0;
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '\n')
+            {
+                longest = Mathf.Max(longest, current);
+                current = 0;
+            }
+            else
+            {
+                current++;
+            }
+        }
+
+        return Mathf.Max(longest, current, 1);
+    }
+
+    private static bool HasTextAnchors(Transform signRoot)
+    {
+        return FindDeepChild(signRoot, "Text") != null && FindDeepChild(signRoot, "TextEnd") != null;
+    }
+
+    private static Transform FindDeepChild(Transform root, string childName)
+    {
+        if (root.name == childName)
+        {
+            return root;
+        }
+
+        for (int i = 0; i < root.childCount; i++)
+        {
+            Transform found = FindDeepChild(root.GetChild(i), childName);
+
+            if (found != null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    private static void DestroyChild(Transform root, string childName)
+    {
+        Transform child = FindDeepChild(root, childName);
+
+        if (child != null)
+        {
+            DestroyGameObject(child.gameObject);
+        }
+    }
+
+    private static void DestroyGameObject(GameObject target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Object.Destroy(target);
+        }
+        else
+        {
+            Object.DestroyImmediate(target);
+        }
+    }
+
+    private static void DestroyComponent(Component target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Object.Destroy(target);
+        }
+        else
+        {
+            Object.DestroyImmediate(target);
+        }
     }
 
     private static float GetGroundY(float worldX, float worldZ)

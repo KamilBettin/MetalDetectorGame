@@ -6,6 +6,9 @@ public class UpgradeShop : MonoBehaviour
     public PlayerInventory playerInventory;
     public MetalDetector metalDetector;
     public Transform shopNpc;
+    public bool allowSelling = true;
+    public bool allowUpgrades = true;
+    public string shopDisplayName = "Trader";
 
     public int detectorUpgradeCost = 75;
     public int rangeUpgradeCost = 75;
@@ -27,6 +30,8 @@ public class UpgradeShop : MonoBehaviour
     public bool IsMenuOpen => isMenuOpen;
     public string ShopMessage => shopMessage;
     public float MessageTimer => messageTimer;
+    public bool CanSellHere => allowSelling;
+    public bool CanUpgradeHere => allowUpgrades;
 
     private void Awake()
     {
@@ -77,6 +82,12 @@ public class UpgradeShop : MonoBehaviour
 
     public void TrySellAll()
     {
+        if (!allowSelling)
+        {
+            ShowMessage("This trader handles upgrades.");
+            return;
+        }
+
         if (!CanUseShop())
         {
             return;
@@ -98,6 +109,12 @@ public class UpgradeShop : MonoBehaviour
 
     public void TrySellItem(PlayerInventory.InventorySlot item)
     {
+        if (!allowSelling)
+        {
+            ShowMessage("This trader handles upgrades.");
+            return;
+        }
+
         if (!CanUseShop())
         {
             return;
@@ -122,6 +139,12 @@ public class UpgradeShop : MonoBehaviour
 
     public void TryBuyRangeUpgrade()
     {
+        if (!allowUpgrades)
+        {
+            ShowMessage("This trader only buys treasures.");
+            return;
+        }
+
         if (!CanUseShop())
         {
             return;
@@ -146,7 +169,7 @@ public class UpgradeShop : MonoBehaviour
         }
 
         metalDetector.IncreaseRange(rangeIncrease);
-        ShowMessage("Range upgraded to " + metalDetector.CurrentSignalRangeCells + " cells.");
+        ShowMessage("Range upgraded to " + metalDetector.DetectionRange.ToString("0.#") + "m.");
 
         rangeUpgradeCost += costIncrease;
         LocalCoopManager.Instance?.ReportTeamStateChanged();
@@ -154,6 +177,12 @@ public class UpgradeShop : MonoBehaviour
 
     public void TryBuyDetectorUpgrade()
     {
+        if (!allowUpgrades)
+        {
+            ShowMessage("This trader only buys treasures.");
+            return;
+        }
+
         if (!CanUseShop())
         {
             return;
@@ -185,6 +214,12 @@ public class UpgradeShop : MonoBehaviour
 
     public void TryBuyInventoryUpgrade()
     {
+        if (!allowUpgrades)
+        {
+            ShowMessage("This trader only buys treasures.");
+            return;
+        }
+
         if (!CanUseShop())
         {
             return;
@@ -211,6 +246,12 @@ public class UpgradeShop : MonoBehaviour
 
     public void TryBuyShovelUpgrade()
     {
+        if (!allowUpgrades)
+        {
+            ShowMessage("This trader only buys treasures.");
+            return;
+        }
+
         if (!CanUseShop())
         {
             return;
@@ -235,6 +276,12 @@ public class UpgradeShop : MonoBehaviour
 
     public void TryBuyLocation()
     {
+        if (!allowUpgrades)
+        {
+            ShowMessage("This trader only buys treasures.");
+            return;
+        }
+
         ShowLocationPurchaseHint();
     }
 
@@ -284,7 +331,7 @@ public class UpgradeShop : MonoBehaviour
         {
             if (isNearShop)
             {
-                GameGui.DrawToast(new Rect(Screen.width * 0.5f - 150f, Screen.height - 178f, 300f, 40f), "Press E to talk to trader");
+                GameGui.DrawToast(new Rect(Screen.width * 0.5f - 150f, Screen.height - 178f, 300f, 40f), "Press E to talk to " + shopDisplayName);
             }
 
             if (messageTimer > 0f)
@@ -296,7 +343,7 @@ public class UpgradeShop : MonoBehaviour
         }
 
         string rangeText = metalDetector != null
-            ? metalDetector.CurrentSignalRangeCells + " cells"
+            ? metalDetector.DetectionRange.ToString("0.#") + "m"
             : "not connected";
         string detectorUpgradeText = metalDetector != null && metalDetector.CanUpgradeDetector
             ? "Upgrade detector to " + metalDetector.GetDetectorName(metalDetector.DetectorTier + 1) + " " + metalDetector.GetScanCellsForTier(metalDetector.DetectorTier + 1) + "x" + metalDetector.GetScanCellsForTier(metalDetector.DetectorTier + 1) + " ($" + detectorUpgradeCost + ")"
@@ -309,32 +356,32 @@ public class UpgradeShop : MonoBehaviour
             : "Upgrade shovel ($" + shovelUpgradeCost + ")";
 
         Rect panelRect = new Rect(Screen.width * 0.5f - 230f, Screen.height * 0.5f - 190f, 460f, 380f);
-        GameGui.DrawPanel(panelRect, "Trader");
+        GameGui.DrawPanel(panelRect, shopDisplayName);
         GUI.Label(new Rect(panelRect.x + 24f, panelRect.y + 44f, 390f, 22f), "Money: $" + playerInventory.money + " | Cargo value: $" + playerInventory.GetInventoryValue(), GameGui.LabelStyle);
         GUI.Label(new Rect(panelRect.x + 24f, panelRect.y + 68f, 390f, 22f), "Detector range: " + rangeText, GameGui.SmallLabelStyle);
         GUI.Label(new Rect(panelRect.x + 24f, panelRect.y + 90f, 390f, 22f), "Backpack: " + playerInventory.gridSize + "x" + playerInventory.gridSize, GameGui.SmallLabelStyle);
 
-        if (GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 128f, 412f, 34f), "Sell all treasures ($" + playerInventory.GetInventoryValue() + ")"))
+        if (allowSelling && GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 128f, 412f, 34f), "Sell all treasures ($" + playerInventory.GetInventoryValue() + ")"))
         {
             TrySellAll();
         }
 
-        if (GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 170f, 412f, 34f), detectorUpgradeText))
+        if (allowUpgrades && GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 170f, 412f, 34f), detectorUpgradeText))
         {
             TryBuyDetectorUpgrade();
         }
 
-        if (GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 212f, 412f, 34f), inventoryUpgradeText))
+        if (allowUpgrades && GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 212f, 412f, 34f), inventoryUpgradeText))
         {
             TryBuyInventoryUpgrade();
         }
 
-        if (GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 254f, 412f, 34f), shovelUpgradeText))
+        if (allowUpgrades && GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 254f, 412f, 34f), shovelUpgradeText))
         {
             TryBuyShovelUpgrade();
         }
 
-        if (GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 296f, 412f, 34f), "Buy land at plot signs"))
+        if (allowUpgrades && GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 296f, 412f, 34f), "Buy land at plot signs"))
         {
             TryBuyLocation();
         }

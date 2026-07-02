@@ -8,10 +8,12 @@ using UnityEditor;
 public static class EnvironmentScatterBootstrapper
 {
     private const string ScatterRootName = "Island Environment Scatter";
+    private const string VegetationAlphaClipTemplateResourcePath = "EnvironmentScatter/Materials/VegetationAlphaClipTemplate";
     private const int RandomSeed = 71342;
     private static readonly Vector2 HomeClearCenter = new Vector2(-700f, -710f);
     private static readonly Vector2 StarterPlotCenter = new Vector2(-745f, -705f);
     private static readonly Dictionary<Material, Material> fallbackMaterialCache = new Dictionary<Material, Material>();
+    private static Material vegetationAlphaClipTemplate;
 
     private static readonly string[] TreePrefabPaths =
     {
@@ -36,6 +38,14 @@ public static class EnvironmentScatterBootstrapper
         "Assets/Forst/Conifers [BOTD]/Sources/Conifer Medium/SM Conifer Medium LOD0.asset",
         "Assets/Forst/Conifers [BOTD]/Sources/Conifer Tall/SM Conifer Tall LOD0.asset",
         "Assets/Forst/Conifers [BOTD]/Sources/Conifer Bare/SM Conifer Bare LOD0.asset"
+    };
+
+    private static readonly string[] ConiferPrefabPaths =
+    {
+        "Assets/Forst/Conifers [BOTD]/Render Pipeline Support/URP/Prefabs/PF Conifer Small BOTD URP.prefab",
+        "Assets/Forst/Conifers [BOTD]/Render Pipeline Support/URP/Prefabs/PF Conifer Medium BOTD URP.prefab",
+        "Assets/Forst/Conifers [BOTD]/Render Pipeline Support/URP/Prefabs/PF Conifer Tall BOTD URP.prefab",
+        "Assets/Forst/Conifers [BOTD]/Render Pipeline Support/URP/Prefabs/PF Conifer Bare BOTD URP.prefab"
     };
 
     private static readonly string[] RockyTreePrefabPaths =
@@ -137,7 +147,8 @@ public static class EnvironmentScatterBootstrapper
         ScatterGroup(terrain, waterLevel, root.transform, "Shore Plants", ShorePlantPrefabPaths, 240, 0.35f, 5.8f, 32f, 0.75f, 1.35f, false, false);
         ScatterGroup(terrain, waterLevel, root.transform, "Inland Trees", TreePrefabPaths, 65, 4.2f, 55f, 34f, 1.15f, 1.85f, false, true);
         ScatterGroup(terrain, waterLevel, root.transform, "Mixed Island Trees", NatureTreePrefabPaths, 36, 4.8f, 46f, 28f, 0.55f, 1.05f, false, true);
-        ScatterMeshGroup(terrain, waterLevel, root.transform, "Sparse Conifers", ConiferMeshAssetPaths, 28, 5.5f, 62f, 30f, 0.6f, 1.25f, false, true);
+        ScatterConiferGroves(terrain, waterLevel, root.transform, "Conifer Groves", ConiferPrefabPaths, 9, 7, 13, 7.5f, 68f, 27f, 8f, 18f, 0.78f, 1.45f);
+        ScatterMeshGroup(terrain, waterLevel, root.transform, "Sparse Conifer Outliers", ConiferMeshAssetPaths, 14, 5.5f, 62f, 30f, 0.6f, 1.1f, false, true);
         ScatterGroup(terrain, waterLevel, root.transform, "Shrubs", ShrubPrefabPaths, 230, 3.2f, 45f, 36f, 0.75f, 1.45f, false, false);
         ScatterGroup(terrain, waterLevel, root.transform, "Mixed Bushes", NatureShrubPrefabPaths, 125, 3.8f, 38f, 30f, 0.45f, 0.95f, false, true);
         ScatterGroup(terrain, waterLevel, root.transform, "Flowers", FlowerPrefabPaths, 260, 4.4f, 35f, 24f, 0.8f, 1.25f, false, false);
@@ -215,6 +226,96 @@ public static class EnvironmentScatterBootstrapper
         }
 
         if (placedCount == 0)
+        {
+            Object.Destroy(groupObject);
+        }
+    }
+
+    private static void ScatterConiferGroves(
+        Terrain terrain,
+        float waterLevel,
+        Transform root,
+        string groupName,
+        string[] prefabPaths,
+        int groveCount,
+        int minTreesPerGrove,
+        int maxTreesPerGrove,
+        float minHeightAboveWater,
+        float maxHeightAboveWater,
+        float maxSteepness,
+        float minGroveRadius,
+        float maxGroveRadius,
+        float minScale,
+        float maxScale)
+    {
+        GameObject[] prefabs = LoadPrefabs(prefabPaths);
+
+        if (prefabs.Length == 0)
+        {
+            return;
+        }
+
+        GameObject groupObject = new GameObject(groupName);
+        groupObject.transform.SetParent(root.transform, false);
+        int placedGroveCount = 0;
+        int maxCenterAttempts = groveCount * 42;
+
+        for (int centerAttempt = 0; centerAttempt < maxCenterAttempts && placedGroveCount < groveCount; centerAttempt++)
+        {
+            if (!TryGetScatterPoint(terrain, waterLevel, minHeightAboveWater, maxHeightAboveWater, maxSteepness, true, out Vector3 center, out _))
+            {
+                continue;
+            }
+
+            float groveRadius = Random.Range(minGroveRadius, maxGroveRadius);
+            int targetTreeCount = Random.Range(minTreesPerGrove, maxTreesPerGrove + 1);
+            GameObject groveObject = new GameObject("Conifer Grove " + (placedGroveCount + 1).ToString("00"));
+            groveObject.transform.SetParent(groupObject.transform, false);
+            int placedTreeCount = 0;
+            int maxTreeAttempts = targetTreeCount * 12;
+
+            for (int treeAttempt = 0; treeAttempt < maxTreeAttempts && placedTreeCount < targetTreeCount; treeAttempt++)
+            {
+                Vector2 offset = Random.insideUnitCircle * groveRadius;
+                Vector3 candidate = new Vector3(center.x + offset.x, center.y, center.z + offset.y);
+
+                if (!TryGetScatterPointAt(terrain, waterLevel, candidate.x, candidate.z, minHeightAboveWater, maxHeightAboveWater, maxSteepness, true, out Vector3 position, out Vector3 normal))
+                {
+                    continue;
+                }
+
+                GameObject prefab = prefabs[Random.Range(0, prefabs.Length)];
+                GameObject instance = InstantiatePrefab(prefab);
+
+                if (instance == null)
+                {
+                    continue;
+                }
+
+                instance.name = prefab.name;
+                instance.transform.SetParent(groveObject.transform, true);
+                instance.transform.position = position;
+                instance.transform.rotation = GetScatterRotation(normal, false);
+
+                float centerDistance = Vector2.Distance(new Vector2(center.x, center.z), new Vector2(position.x, position.z));
+                float edgeBlend = Mathf.InverseLerp(groveRadius, 0f, centerDistance);
+                float scale = Random.Range(minScale, maxScale) * Mathf.Lerp(0.82f, 1.12f, edgeBlend);
+                instance.transform.localScale = Vector3.Scale(instance.transform.localScale, Vector3.one * scale);
+
+                DisableColliders(instance);
+                placedTreeCount++;
+            }
+
+            if (placedTreeCount == 0)
+            {
+                Object.Destroy(groveObject);
+                continue;
+            }
+
+            placedGroveCount++;
+        }
+
+        if (placedGroveCount == 0)
         {
             Object.Destroy(groupObject);
         }
@@ -369,6 +470,57 @@ public static class EnvironmentScatterBootstrapper
         return true;
     }
 
+    private static bool TryGetScatterPointAt(
+        Terrain terrain,
+        float waterLevel,
+        float worldX,
+        float worldZ,
+        float minHeightAboveWater,
+        float maxHeightAboveWater,
+        float maxSteepness,
+        bool keepClearOfHome,
+        out Vector3 position,
+        out Vector3 normal)
+    {
+        TerrainData terrainData = terrain.terrainData;
+        Vector3 terrainPosition = terrain.transform.position;
+        Vector3 terrainSize = terrainData.size;
+
+        position = Vector3.zero;
+        normal = Vector3.up;
+
+        if (worldX < terrainPosition.x || worldX > terrainPosition.x + terrainSize.x || worldZ < terrainPosition.z || worldZ > terrainPosition.z + terrainSize.z)
+        {
+            return false;
+        }
+
+        float normalizedX = Mathf.InverseLerp(terrainPosition.x, terrainPosition.x + terrainSize.x, worldX);
+        float normalizedZ = Mathf.InverseLerp(terrainPosition.z, terrainPosition.z + terrainSize.z, worldZ);
+        float groundY = terrainPosition.y + terrainData.GetInterpolatedHeight(normalizedX, normalizedZ);
+        float heightAboveWater = groundY - waterLevel;
+        float steepness = terrainData.GetSteepness(normalizedX, normalizedZ);
+
+        position = new Vector3(worldX, groundY, worldZ);
+        normal = terrainData.GetInterpolatedNormal(normalizedX, normalizedZ);
+
+        if (heightAboveWater < minHeightAboveWater || heightAboveWater > maxHeightAboveWater)
+        {
+            return false;
+        }
+
+        if (steepness > maxSteepness)
+        {
+            return false;
+        }
+
+        if (keepClearOfHome && IsInsideClearZone(position))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private static bool IsInsideClearZone(Vector3 position)
     {
         Vector2 groundPosition = new Vector2(position.x, position.z);
@@ -494,10 +646,15 @@ public static class EnvironmentScatterBootstrapper
 
     private static void ApplyFallbackMaterials(GameObject instance)
     {
-        Renderer[] renderers = instance.GetComponentsInChildren<Renderer>();
+        Renderer[] renderers = instance.GetComponentsInChildren<Renderer>(true);
 
         foreach (Renderer renderer in renderers)
         {
+            if (renderer is BillboardRenderer)
+            {
+                continue;
+            }
+
             Material[] sourceMaterials = renderer.sharedMaterials;
 
             if (sourceMaterials == null || sourceMaterials.Length == 0)
@@ -528,14 +685,18 @@ public static class EnvironmentScatterBootstrapper
             return cachedMaterial;
         }
 
-        Texture baseTexture = GetMaterialTexture(sourceMaterial, "_BaseMap", "_BaseTexture", "_BASETEXTURE", "_MainTex");
-        bool alphaClipped = IsVegetationMaterial(sourceMaterial.name);
-        Material material = CreateFallbackMaterial(GetReadableTint(sourceMaterial.name), baseTexture, alphaClipped, sourceMaterial.name + "_Fallback");
+        string materialContext = sourceMaterial.name + " " + rendererName + " " + instanceName;
+        string alphaContext = sourceMaterial.name + " " + rendererName;
+        Texture baseTexture = GetMaterialTexture(sourceMaterial, "_BaseMap", "_BaseTexture", "_BASETEXTURE", "_BaseColorMap", "_MainTex");
+        bool alphaClipped = ShouldAlphaClipMaterial(sourceMaterial, alphaContext);
+        float cutoff = GetMaterialFloat(sourceMaterial, 0.5f, "_Cutoff", "_MaskClipValue");
+        Color tint = GetMaterialColor(sourceMaterial, GetReadableTint(materialContext), "_BaseColor", "_Color");
+        Material material = CreateFallbackMaterial(tint, baseTexture, alphaClipped, sourceMaterial.name + "_Fallback", cutoff);
         fallbackMaterialCache[sourceMaterial] = material;
         return material;
     }
 
-    private static Material CreateFallbackMaterial(Color color, Texture baseTexture, bool alphaClipped, string materialName)
+    private static Material CreateFallbackMaterial(Color color, Texture baseTexture, bool alphaClipped, string materialName, float cutoff = 0.5f)
     {
         Shader shader = Shader.Find("Universal Render Pipeline/Lit");
 
@@ -544,11 +705,17 @@ public static class EnvironmentScatterBootstrapper
             shader = Shader.Find("Standard");
         }
 
-        Material material = new Material(shader)
+        Material material = alphaClipped && GetVegetationAlphaClipTemplate() != null
+            ? new Material(GetVegetationAlphaClipTemplate())
+            : new Material(shader);
+
+        material.name = materialName;
+        material.color = color;
+
+        if (shader != null && material.shader == null)
         {
-            name = materialName,
-            color = color
-        };
+            material.shader = shader;
+        }
 
         SetMaterialColor(material, color, "_BaseColor", "_Color");
 
@@ -563,12 +730,30 @@ public static class EnvironmentScatterBootstrapper
         if (alphaClipped)
         {
             SetMaterialFloat(material, 1f, "_AlphaClip");
-            SetMaterialFloat(material, 0.42f, "_Cutoff");
+            SetMaterialFloat(material, 1f, "_AlphaToMask");
+            SetMaterialFloat(material, 0f, "_Surface");
+            SetMaterialFloat(material, Mathf.Clamp(cutoff, 0.05f, 0.95f), "_Cutoff");
+            SetMaterialFloat(material, 0f, "_Cull", "_CullMode");
+            SetMaterialFloat(material, 1f, "_ZWrite");
             material.EnableKeyword("_ALPHATEST_ON");
+            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            material.DisableKeyword("_ALPHABLEND_ON");
+            material.SetOverrideTag("RenderType", "TransparentCutout");
+            material.doubleSidedGI = true;
             material.renderQueue = 2450;
         }
 
         return material;
+    }
+
+    private static Material GetVegetationAlphaClipTemplate()
+    {
+        if (vegetationAlphaClipTemplate == null)
+        {
+            vegetationAlphaClipTemplate = Resources.Load<Material>(VegetationAlphaClipTemplateResourcePath);
+        }
+
+        return vegetationAlphaClipTemplate;
     }
 
     private static bool IsVegetationMaterial(string materialName)
@@ -576,10 +761,40 @@ public static class EnvironmentScatterBootstrapper
         string lowerName = materialName.ToLowerInvariant();
         return lowerName.Contains("leaf")
             || lowerName.Contains("leaves")
+            || lowerName.Contains("branch")
+            || lowerName.Contains("branches")
             || lowerName.Contains("foliage")
+            || lowerName.Contains("needle")
+            || lowerName.Contains("needles")
             || lowerName.Contains("grass")
+            || lowerName.Contains("bush")
+            || lowerName.Contains("shrub")
             || lowerName.Contains("poppy")
             || lowerName.Contains("mushroom");
+    }
+
+    private static bool ShouldAlphaClipMaterial(Material material, string materialContext)
+    {
+        return IsVegetationMaterial(materialContext)
+            || HasAlphaKeyword(material);
+    }
+
+    private static bool HasAlphaKeyword(Material material)
+    {
+        if (material == null || material.shaderKeywords == null)
+        {
+            return false;
+        }
+
+        foreach (string keyword in material.shaderKeywords)
+        {
+            if (keyword == "_ALPHATEST_ON" || keyword == "_ALPHAPREMULTIPLY_ON" || keyword == "_ALPHABLEND_ON")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static Color GetReadableTint(string objectName)
@@ -635,6 +850,32 @@ public static class EnvironmentScatterBootstrapper
         }
 
         return null;
+    }
+
+    private static Color GetMaterialColor(Material material, Color fallback, params string[] names)
+    {
+        foreach (string propertyName in names)
+        {
+            if (material.HasProperty(propertyName))
+            {
+                return material.GetColor(propertyName);
+            }
+        }
+
+        return fallback;
+    }
+
+    private static float GetMaterialFloat(Material material, float fallback, params string[] names)
+    {
+        foreach (string propertyName in names)
+        {
+            if (material.HasProperty(propertyName))
+            {
+                return material.GetFloat(propertyName);
+            }
+        }
+
+        return fallback;
     }
 
     private static void SetMaterialTexture(Material material, Texture texture, params string[] names)

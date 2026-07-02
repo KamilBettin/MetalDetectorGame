@@ -15,6 +15,9 @@ public class DetectableTreasure : MonoBehaviour
     public bool isFound;
     public SearchMarker revealMarker;
 
+    public float DigProgress01 => requiredDigHits > 0 ? Mathf.Clamp01(currentDigHits / (float)requiredDigHits) : 0f;
+    public bool IsDugUp => currentDigHits >= Mathf.Max(1, requiredDigHits);
+
     public void Reveal(SearchMarker marker)
     {
         if (isFound || isRevealed)
@@ -28,7 +31,7 @@ public class DetectableTreasure : MonoBehaviour
 
     public bool DigOnce()
     {
-        currentDigHits++;
-        return currentDigHits >= requiredDigHits;
+        currentDigHits = Mathf.Min(currentDigHits + 1, Mathf.Max(1, requiredDigHits));
+        return IsDugUp;
     }
 }

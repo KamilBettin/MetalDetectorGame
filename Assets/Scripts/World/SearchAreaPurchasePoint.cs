@@ -11,6 +11,8 @@ public class SearchAreaPurchasePoint : MonoBehaviour
 
     private string message = "";
     private float messageTimer;
+    public Vector3 PromptPosition => transform.position + promptWorldOffset;
+    public string PromptActionText => targetArea != null && targetArea.unlockCost <= 0 ? "Claim Area" : "Buy Area";
 
     private void Awake()
     {
@@ -62,13 +64,42 @@ public class SearchAreaPurchasePoint : MonoBehaviour
         ShowMessage(resultMessage);
     }
 
-    private bool CanInteract()
+    public bool CanInteract()
     {
+        ResolveReferences();
+
         return targetArea != null
             && !targetArea.isUnlocked
             && playerInventory != null
             && IsPlayerInRange()
             && !GameUIState.AnyMenuOpen;
+    }
+
+    public static SearchAreaPurchasePoint FindClosestInteractableInRange()
+    {
+        SearchAreaPurchasePoint[] purchasePoints = FindObjectsByType<SearchAreaPurchasePoint>();
+        SearchAreaPurchasePoint closest = null;
+        float closestDistance = float.MaxValue;
+
+        foreach (SearchAreaPurchasePoint purchasePoint in purchasePoints)
+        {
+            if (purchasePoint == null || !purchasePoint.CanInteract())
+            {
+                continue;
+            }
+
+            float distance = purchasePoint.player != null
+                ? Vector3.Distance(purchasePoint.player.position, purchasePoint.transform.position)
+                : 0f;
+
+            if (distance < closestDistance)
+            {
+                closestDistance = distance;
+                closest = purchasePoint;
+            }
+        }
+
+        return closest;
     }
 
     private void ResolveReferences()

@@ -17,6 +17,7 @@ public class StartMenuUI : MonoBehaviour
     private InputField addressInput;
     private InputField portInput;
     private int selectedIndex;
+    private int hoveredIndex = -1;
     private float messageTimer;
     private readonly string[] menuItems = { "New Game", "Continue", "Multiplayer", "Settings", "Quit" };
 
@@ -147,7 +148,8 @@ public class StartMenuUI : MonoBehaviour
             button.onClick.AddListener(() => ActivateItem(itemIndex));
 
             EventTrigger trigger = buttonTransform.gameObject.AddComponent<EventTrigger>();
-            AddEventTrigger(trigger, EventTriggerType.PointerEnter, () => SetSelected(itemIndex));
+            AddEventTrigger(trigger, EventTriggerType.PointerEnter, () => HandlePointerEnter(itemIndex));
+            AddEventTrigger(trigger, EventTriggerType.PointerExit, () => HandlePointerExit(itemIndex));
         }
     }
 
@@ -160,7 +162,7 @@ public class StartMenuUI : MonoBehaviour
         selectionFrame.sizeDelta = new Vector2(452f, 118f);
 
         Image frameImage = selectionFrame.gameObject.AddComponent<Image>();
-        frameImage.color = new Color(1f, 0.78f, 0.24f, 0.16f);
+        frameImage.color = new Color(1f, 0.82f, 0.32f, 0.08f);
         frameImage.raycastTarget = false;
         SetSelected(0);
     }
@@ -218,11 +220,13 @@ public class StartMenuUI : MonoBehaviour
         switch (itemIndex)
         {
             case 0:
+                GameSaveSystem.StartNewGame();
                 CloseMenu();
                 IntroLetterUI.Show();
                 break;
             case 1:
-                ShowMessage("No save file yet. Starting the current island.");
+                GameSaveSystem.ContinueGame(out string continueMessage);
+                ShowMessage(continueMessage);
                 CloseMenu();
                 break;
             case 2:
@@ -320,6 +324,11 @@ public class StartMenuUI : MonoBehaviour
 
     private void SetSelected(int itemIndex)
     {
+        SetSelected(itemIndex, true);
+    }
+
+    private void SetSelected(int itemIndex, bool showFrame)
+    {
         selectedIndex = Mathf.Clamp(itemIndex, 0, menuItems.Length - 1);
 
         if (selectionFrame == null)
@@ -327,8 +336,33 @@ public class StartMenuUI : MonoBehaviour
             return;
         }
 
+        selectionFrame.gameObject.SetActive(showFrame);
+
+        if (!showFrame)
+        {
+            return;
+        }
+
         float[] topPositions = { 252f, 384f, 516f, 649f, 781f };
-        selectionFrame.anchoredPosition = new Vector2(70f, -topPositions[selectedIndex]);
+        selectionFrame.anchoredPosition = new Vector2(80f, -topPositions[selectedIndex] - 14f);
+        selectionFrame.sizeDelta = new Vector2(432f, 98f);
+    }
+
+    private void HandlePointerEnter(int itemIndex)
+    {
+        hoveredIndex = itemIndex;
+        SetSelected(itemIndex);
+    }
+
+    private void HandlePointerExit(int itemIndex)
+    {
+        if (hoveredIndex != itemIndex)
+        {
+            return;
+        }
+
+        hoveredIndex = -1;
+        SetSelected(selectedIndex, false);
     }
 
     private void CreateMultiplayerPanel(RectTransform parent)

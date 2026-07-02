@@ -14,6 +14,8 @@ public class FirstPersonController : MonoBehaviour
     public OceanWaterSurface waterSurface;
     public float maxWaterDepth = 0.9f;
     public float waterMoveSpeedMultiplier = 0.62f;
+    public bool slowMovementWhileScanning = true;
+    [Range(0.05f, 1f)] public float scanningMoveSpeedMultiplier = 0.18f;
 
     public Transform playerCamera;
 
@@ -100,9 +102,17 @@ public class FirstPersonController : MonoBehaviour
         }
 
         input = Vector2.ClampMagnitude(input, 1f);
-        bool isSprinting = Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed;
+        bool isSprinting = Keyboard.current != null
+            && Keyboard.current.leftShiftKey.isPressed
+            && input.y > 0f
+            && !IsScanInputHeld();
         Vector3 moveDirection = transform.right * input.x + transform.forward * input.y;
         float currentSpeed = isSprinting ? sprintSpeed : moveSpeed;
+        if (slowMovementWhileScanning && IsScanInputHeld())
+        {
+            currentSpeed *= scanningMoveSpeedMultiplier;
+        }
+
         currentSpeed *= GetWaterSpeedMultiplier(transform.position);
         Vector3 horizontalMove = moveDirection * currentSpeed * Time.deltaTime;
         horizontalMove = LimitDeepWaterMove(horizontalMove);
@@ -121,6 +131,11 @@ public class FirstPersonController : MonoBehaviour
         Vector3 verticalMove = Vector3.up * verticalVelocity * Time.deltaTime;
 
         controller.Move(horizontalMove + verticalMove);
+    }
+
+    private bool IsScanInputHeld()
+    {
+        return Mouse.current != null && Mouse.current.leftButton.isPressed;
     }
 
     private Vector3 LimitDeepWaterMove(Vector3 desiredMove)

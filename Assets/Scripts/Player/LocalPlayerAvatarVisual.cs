@@ -1,5 +1,6 @@
 using UnityEngine;
 
+[DefaultExecutionOrder(100)]
 [ExecuteAlways]
 public class LocalPlayerAvatarVisual : MonoBehaviour
 {
@@ -7,7 +8,7 @@ public class LocalPlayerAvatarVisual : MonoBehaviour
     private const string RightHandAnchorName = "Right Hand Anchor";
 
     public bool showOnlyLocalShadow = true;
-    public bool useUmaEditorPreview = true;
+    public bool useUmaEditorPreview = false;
     public bool useSimpleEditorFallback = true;
 
     private int appliedAvatarToken = -1;

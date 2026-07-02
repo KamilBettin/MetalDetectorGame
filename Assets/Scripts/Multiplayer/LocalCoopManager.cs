@@ -10,14 +10,27 @@ using UnityEngine;
 public class LocalCoopManager : MonoBehaviour
 {
     private const string MessageSeparator = "|";
+    private const string HomeItemSeparator = ";";
+    private const string HomeItemFieldSeparator = "~";
     private const string DefaultPlayerName = "Hunter";
     private const float RemoteLerpSpeed = 10f;
+    private const float HostClockSyncInterval = 2f;
 
     public enum CoopRole
     {
         Offline,
         Host,
         Client
+    }
+
+    [Serializable]
+    public struct SavedRemotePlayerState
+    {
+        public int playerId;
+        public string playerName;
+        public Vector3 position;
+        public Quaternion rotation;
+        public int characterIndex;
     }
 
     private class PeerConnection
@@ -44,6 +57,7 @@ public class LocalCoopManager : MonoBehaviour
         public Transform transform;
         public Transform visualRoot;
         public TextMesh nameText;
+        public string playerName;
         public Vector3 targetPosition;
         public Quaternion targetRotation;
         public int characterIndex = -1;
@@ -72,6 +86,7 @@ public class LocalCoopManager : MonoBehaviour
     private readonly Dictionary<ulong, int> steamPeerIds = new Dictionary<ulong, int>();
     private readonly Dictionary<int, ulong> peerSteamIds = new Dictionary<int, ulong>();
     private readonly Dictionary<int, RemotePlayer> remotePlayers = new Dictionary<int, RemotePlayer>();
+    private readonly HashSet<int> sleepReadyPlayerIds = new HashSet<int>();
     private readonly List<int> disconnectedPeerIds = new List<int>();
 
     private TcpListener listener;
@@ -90,9 +105,21 @@ public class LocalCoopManager : MonoBehaviour
     private string localPlayerName = DefaultPlayerName;
     private Transform localPlayer;
     private float nextSendTime;
+    private float nextClockSyncTime;
     private Material remoteBodyMaterial;
     private Material remoteDetectorMaterial;
     private bool applyingRemoteTeamState;
+    private bool applyingRemoteHomeStorageState;
+    private bool localSleepReady;
+    private int syncedSleepReadyCount;
+    private int syncedSleepRequiredCount;
+    private string sleepStatusText = "";
+
+    public bool HasTeamSleepVote => Role != CoopRole.Offline && (localSleepReady || sleepReadyPlayerIds.Count > 0 || syncedSleepReadyCount > 0);
+    public bool IsLocalPlayerSleepReady => Role == CoopRole.Host ? sleepReadyPlayerIds.Contains(GetHostPlayerId()) : localSleepReady;
+    public int TeamSleepReadyCount => Role == CoopRole.Host ? sleepReadyPlayerIds.Count : syncedSleepReadyCount;
+    public int TeamSleepRequiredCount => Role == CoopRole.Host ? GetRequiredSleepPlayerIds().Count : syncedSleepRequiredCount;
+    public string TeamSleepStatusText => sleepStatusText;
 
     private void Awake()
     {
@@ -124,6 +151,7 @@ public class LocalCoopManager : MonoBehaviour
         CacheLocalPlayer();
         ProcessQueuedMessages();
         UpdateRemotePlayers();
+        UpdateTeamSleepState();
         SendLocalStateIfReady();
     }
 
@@ -143,7 +171,6 @@ public class LocalCoopManager : MonoBehaviour
             acceptThread.Start();
             Role = CoopRole.Host;
             StatusText = "Hosting on port " + port;
-            MoveLocalPlayerToNetworkSpawn();
             return true;
         }
         catch (Exception exception)
@@ -208,7 +235,6 @@ public class LocalCoopManager : MonoBehaviour
         usingSteamTransport = true;
         Role = CoopRole.Host;
         StatusText = "Steam host ready. Your Steam ID: " + steamTransport.LocalSteamId;
-        MoveLocalPlayerToNetworkSpawn();
         return true;
     }
 
@@ -248,6 +274,8 @@ public class LocalCoopManager : MonoBehaviour
         Role = CoopRole.Offline;
         localPlayerId = 0;
         nextSendTime = 0f;
+        nextClockSyncTime = 0f;
+        ClearTeamSleepState(false);
 
         try
         {
@@ -280,6 +308,72 @@ public class LocalCoopManager : MonoBehaviour
         clientReader = null;
         clientWriter = null;
 
+        ClearRemotePlayerVisuals();
+        StatusText = "Offline";
+    }
+
+    public List<SavedRemotePlayerState> CaptureRemotePlayerStates()
+    {
+        List<SavedRemotePlayerState> states = new List<SavedRemotePlayerState>();
+
+        foreach (KeyValuePair<int, RemotePlayer> entry in remotePlayers)
+        {
+            RemotePlayer remotePlayer = entry.Value;
+
+            if (remotePlayer == null || remotePlayer.transform == null)
+            {
+                continue;
+            }
+
+            states.Add(new SavedRemotePlayerState
+            {
+                playerId = entry.Key,
+                playerName = string.IsNullOrWhiteSpace(remotePlayer.playerName) ? "Player " + entry.Key : remotePlayer.playerName,
+                position = remotePlayer.targetPosition,
+                rotation = remotePlayer.targetRotation,
+                characterIndex = Mathf.Max(0, remotePlayer.characterIndex)
+            });
+        }
+
+        return states;
+    }
+
+    public void RestoreSavedRemotePlayerStates(IEnumerable<SavedRemotePlayerState> states)
+    {
+        ClearRemotePlayerVisuals();
+
+        if (states == null)
+        {
+            StatusText = "Offline";
+            return;
+        }
+
+        foreach (SavedRemotePlayerState state in states)
+        {
+            if (state.playerId == localPlayerId)
+            {
+                continue;
+            }
+
+            string playerName = string.IsNullOrWhiteSpace(state.playerName) ? "Player " + state.playerId : state.playerName;
+            RemotePlayer remotePlayer = EnsureRemotePlayer(state.playerId, playerName);
+            remotePlayer.targetPosition = state.position;
+            remotePlayer.targetRotation = state.rotation;
+
+            if (remotePlayer.transform != null)
+            {
+                remotePlayer.transform.position = state.position;
+                remotePlayer.transform.rotation = state.rotation;
+            }
+
+            ApplyRemoteCharacter(remotePlayer, Mathf.Max(0, state.characterIndex));
+        }
+
+        StatusText = remotePlayers.Count > 0 ? "Offline: saved players loaded" : "Offline";
+    }
+
+    public void ClearRemotePlayerVisuals()
+    {
         foreach (RemotePlayer remotePlayer in remotePlayers.Values)
         {
             if (remotePlayer.root != null)
@@ -289,7 +383,6 @@ public class LocalCoopManager : MonoBehaviour
         }
 
         remotePlayers.Clear();
-        StatusText = "Offline";
     }
 
     public void ReceiveSteamLine(ulong senderSteamId, string line)
@@ -349,6 +442,8 @@ public class LocalCoopManager : MonoBehaviour
                 BroadcastFromHost("JOIN" + MessageSeparator + peer.id.ToString(CultureInfo.InvariantCulture) + MessageSeparator + Escape(peer.playerName), peer.id);
                 EnqueueMessage(0, "JOIN" + MessageSeparator + peer.id.ToString(CultureInfo.InvariantCulture) + MessageSeparator + Escape(peer.playerName));
                 SendToPeer(peer, BuildTeamStateMessage());
+                SendToPeer(peer, BuildHomeStorageMessage());
+                SendToPeer(peer, BuildSleepStateMessage());
                 SendTreasureSnapshotToPeer(peer);
 
                 peer.readThread = new Thread(() => HostReadLoop(peer)) { IsBackground = true };
@@ -497,6 +592,13 @@ public class LocalCoopManager : MonoBehaviour
                 HandleTeamState(parts);
                 RelayHostMessage(senderId, steamSenderId, line);
                 break;
+            case "HOME":
+                HandleHomeStorageState(parts);
+                RelayHostMessage(senderId, steamSenderId, line);
+                break;
+            case "SLEEP":
+                HandleSleepMessage(senderId, steamSenderId, parts);
+                break;
             case "DISCONNECT":
                 HandleHostPeerDisconnect(parts);
                 break;
@@ -546,6 +648,8 @@ public class LocalCoopManager : MonoBehaviour
         BroadcastFromHost("JOIN" + MessageSeparator + peerId.ToString(CultureInfo.InvariantCulture) + MessageSeparator + Escape(playerName), peerId);
         EnqueueMessage(0, "JOIN" + MessageSeparator + peerId.ToString(CultureInfo.InvariantCulture) + MessageSeparator + Escape(playerName));
         steamTransport.SendToPeer(senderSteamId, BuildTeamStateMessage());
+        steamTransport.SendToPeer(senderSteamId, BuildHomeStorageMessage());
+        steamTransport.SendToPeer(senderSteamId, BuildSleepStateMessage());
         SendTreasureSnapshotToSteamPeer(senderSteamId);
         StatusText = "Steam hosting: " + remotePlayers.Count + " connected";
     }
@@ -559,7 +663,6 @@ public class LocalCoopManager : MonoBehaviour
 
         localPlayerId = assignedId;
         StatusText = "Connected as player " + localPlayerId;
-        MoveLocalPlayerToNetworkSpawn();
     }
 
     private void HandleJoin(string[] parts)
@@ -578,6 +681,12 @@ public class LocalCoopManager : MonoBehaviour
 
         EnsureRemotePlayer(playerId, playerName);
         StatusText = Role == CoopRole.Host ? "Hosting: " + remotePlayers.Count + " connected" : "Connected: " + remotePlayers.Count + " nearby";
+
+        if (Role == CoopRole.Host && HasTeamSleepVote)
+        {
+            UpdateHostSleepStatusText();
+            BroadcastFromHost(BuildSleepStateMessage(), 0);
+        }
     }
 
     private void HandleLeave(string[] parts)
@@ -602,7 +711,10 @@ public class LocalCoopManager : MonoBehaviour
         Vector3 position = new Vector3(ParseFloat(parts[2]), ParseFloat(parts[3]), ParseFloat(parts[4]));
         Quaternion rotation = new Quaternion(ParseFloat(parts[5]), ParseFloat(parts[6]), ParseFloat(parts[7]), ParseFloat(parts[8]));
         int characterIndex = parts.Length > 9 ? ParseInt(parts[9]) : 0;
-        RemotePlayer remotePlayer = EnsureRemotePlayer(playerId, "Player " + playerId);
+        string playerName = remotePlayers.TryGetValue(playerId, out RemotePlayer existingRemotePlayer)
+            ? existingRemotePlayer.playerName
+            : "Player " + playerId;
+        RemotePlayer remotePlayer = EnsureRemotePlayer(playerId, playerName);
         remotePlayer.targetPosition = position;
         remotePlayer.targetRotation = rotation;
         ApplyRemoteCharacter(remotePlayer, characterIndex);
@@ -640,7 +752,7 @@ public class LocalCoopManager : MonoBehaviour
 
     private void HandleTeamState(string[] parts)
     {
-        if (parts.Length < 8)
+        if (parts.Length < 2)
         {
             return;
         }
@@ -649,52 +761,10 @@ public class LocalCoopManager : MonoBehaviour
 
         try
         {
-            int money = ParseInt(parts[1]);
-            int gridSize = ParseInt(parts[2]);
-            float detectionRange = ParseFloat(parts[3]);
-            int rangeUpgradeCost = ParseInt(parts[4]);
-            int inventoryUpgradeCost = ParseInt(parts[5]);
-            bool shovelUpgraded = ParseInt(parts[6]) != 0;
-            string unlockedAreas = Unescape(parts[7]);
-
-            PlayerInventory[] inventories = FindObjectsByType<PlayerInventory>();
-
-            foreach (PlayerInventory inventory in inventories)
-            {
-                if (inventory == null)
-                {
-                    continue;
-                }
-
-                inventory.money = money;
-                inventory.gridSize = Mathf.Clamp(gridSize, 1, inventory.maxGridSize);
-            }
-
-            MetalDetector[] detectors = FindObjectsByType<MetalDetector>();
-
-            foreach (MetalDetector detector in detectors)
-            {
-                if (detector == null)
-                {
-                    continue;
-                }
-
-                detector.detectionRange = Mathf.Max(1f, detectionRange);
-            }
-
-            UpgradeShop[] shops = FindObjectsByType<UpgradeShop>();
-
-            foreach (UpgradeShop shop in shops)
-            {
-                if (shop == null)
-                {
-                    continue;
-                }
-
-                shop.rangeUpgradeCost = Mathf.Max(0, rangeUpgradeCost);
-                shop.inventoryUpgradeCost = Mathf.Max(0, inventoryUpgradeCost);
-                shop.shovelUpgraded = shovelUpgraded;
-            }
+            bool legacyTeamState = parts.Length >= 8;
+            int unlockedAreasIndex = legacyTeamState ? 7 : 1;
+            int dayNumberIndex = legacyTeamState ? 8 : 2;
+            string unlockedAreas = Unescape(parts[unlockedAreasIndex]);
 
             if (!string.IsNullOrEmpty(unlockedAreas))
             {
@@ -708,11 +778,116 @@ public class LocalCoopManager : MonoBehaviour
                     }
                 }
             }
+
+            if (Role != CoopRole.Host && parts.Length >= dayNumberIndex + 3 && DayNightCycle.Instance != null)
+            {
+                int dayNumber = ParseInt(parts[dayNumberIndex]);
+                bool isNight = ParseInt(parts[dayNumberIndex + 1]) != 0;
+                float phase01 = ParseFloat(parts[dayNumberIndex + 2]);
+                DayNightCycle.Instance.ApplySavedState(dayNumber, isNight, phase01);
+            }
         }
         finally
         {
             applyingRemoteTeamState = false;
         }
+    }
+
+    private void HandleHomeStorageState(string[] parts)
+    {
+        if (parts.Length < 2)
+        {
+            return;
+        }
+
+        PlayerHome home = FindAnyObjectByType<PlayerHome>();
+
+        if (home == null)
+        {
+            return;
+        }
+
+        List<PlayerInventory.InventorySlot> importedItems = DecodeHomeStorageItems(parts[1]);
+        applyingRemoteHomeStorageState = true;
+
+        try
+        {
+            home.ImportStoredItems(importedItems);
+        }
+        finally
+        {
+            applyingRemoteHomeStorageState = false;
+        }
+    }
+
+    private void HandleSleepMessage(int senderId, ulong steamSenderId, string[] parts)
+    {
+        if (parts.Length < 2)
+        {
+            return;
+        }
+
+        switch (parts[1])
+        {
+            case "READY":
+                HandleSleepReady(senderId, steamSenderId);
+                break;
+            case "STATE":
+                HandleSleepState(parts);
+                break;
+            case "DONE":
+                ClearTeamSleepState(false);
+                sleepStatusText = parts.Length > 2 ? Unescape(parts[2]) : "Everyone slept until morning.";
+                break;
+        }
+    }
+
+    private void HandleSleepReady(int senderId, ulong steamSenderId)
+    {
+        if (Role != CoopRole.Host || DayNightCycle.Instance == null || !DayNightCycle.Instance.CanSleep)
+        {
+            return;
+        }
+
+        int playerId = senderId;
+
+        if (playerId <= 0 && steamSenderId != 0)
+        {
+            steamPeerIds.TryGetValue(steamSenderId, out playerId);
+        }
+
+        if (playerId <= 0)
+        {
+            return;
+        }
+
+        sleepReadyPlayerIds.Add(playerId);
+
+        if (TryFinishTeamSleep(out _))
+        {
+            return;
+        }
+
+        UpdateHostSleepStatusText();
+        BroadcastFromHost(BuildSleepStateMessage(), 0);
+    }
+
+    private void HandleSleepState(string[] parts)
+    {
+        if (Role == CoopRole.Host)
+        {
+            return;
+        }
+
+        syncedSleepReadyCount = parts.Length > 2 ? Mathf.Max(0, ParseInt(parts[2])) : 0;
+        syncedSleepRequiredCount = parts.Length > 3 ? Mathf.Max(1, ParseInt(parts[3])) : Mathf.Max(1, remotePlayers.Count + 1);
+
+        if (parts.Length > 4)
+        {
+            localSleepReady = IsIdInList(localPlayerId, parts[4]);
+        }
+
+        sleepStatusText = parts.Length > 5 ? Unescape(parts[5]) : BuildSleepStatusText(syncedSleepReadyCount, syncedSleepRequiredCount);
     }
 
     private void HandleHostPeerDisconnect(string[] parts)
@@ -725,6 +900,14 @@ public class LocalCoopManager : MonoBehaviour
         disconnectedPeerIds.Add(peerId);
         BroadcastFromHost("LEAVE" + MessageSeparator + peerId.ToString(CultureInfo.InvariantCulture), peerId);
         RemoveRemotePlayer(peerId);
+        sleepReadyPlayerIds.Remove(peerId);
+        if (TryFinishTeamSleep(out _))
+        {
+            StatusText = "Hosting: " + remotePlayers.Count + " connected";
+            return;
+        }
+
+        BroadcastFromHost(BuildSleepStateMessage(), 0);
         StatusText = "Hosting: " + remotePlayers.Count + " connected";
     }
 
@@ -754,6 +937,12 @@ public class LocalCoopManager : MonoBehaviour
         if (Role == CoopRole.Host)
         {
             BroadcastFromHost(message, 0);
+
+            if (Time.unscaledTime >= nextClockSyncTime)
+            {
+                nextClockSyncTime = Time.unscaledTime + HostClockSyncInterval;
+                BroadcastFromHost(BuildTeamStateMessage(), 0);
+            }
         }
         else if (usingSteamTransport)
         {
@@ -824,6 +1013,87 @@ public class LocalCoopManager : MonoBehaviour
         SendTeamStateFromCurrentRole();
     }
 
+    public bool RequestTeamSleep(out string statusMessage)
+    {
+        statusMessage = "";
+
+        if (Role == CoopRole.Offline)
+        {
+            return false;
+        }
+
+        if (DayNightCycle.Instance == null)
+        {
+            statusMessage = "Sleep is not ready yet.";
+            return true;
+        }
+
+        if (!DayNightCycle.Instance.CanSleep)
+        {
+            statusMessage = "You can sleep after 20:00.";
+            return true;
+        }
+
+        if (Role == CoopRole.Host)
+        {
+            sleepReadyPlayerIds.Add(GetHostPlayerId());
+            localSleepReady = true;
+
+            if (TryFinishTeamSleep(out statusMessage))
+            {
+                return true;
+            }
+
+            UpdateHostSleepStatusText();
+            BroadcastFromHost(BuildSleepStateMessage(), 0);
+            statusMessage = sleepStatusText;
+            return true;
+        }
+
+        localSleepReady = true;
+        syncedSleepReadyCount = Mathf.Max(1, syncedSleepReadyCount);
+        syncedSleepRequiredCount = Mathf.Max(1, syncedSleepRequiredCount);
+        sleepStatusText = "Ready to sleep. Waiting for the team.";
+
+        string message = "SLEEP" + MessageSeparator + "READY";
+
+        if (usingSteamTransport)
+        {
+            steamTransport.SendToHost(message);
+        }
+        else
+        {
+            SendToServer(message);
+        }
+
+        statusMessage = sleepStatusText;
+        return true;
+    }
+
+    public void ReportHomeStorageChanged(PlayerHome home)
+    {
+        if (Role == CoopRole.Offline || applyingRemoteHomeStorageState || home == null)
+        {
+            return;
+        }
+
+        string message = BuildHomeStorageMessage(home);
+
+        if (Role == CoopRole.Host)
+        {
+            BroadcastFromHost(message, 0);
+            return;
+        }
+
+        if (usingSteamTransport)
+        {
+            steamTransport.SendToHost(message);
+            return;
+        }
+
+        SendToServer(message);
+    }
+
     private void HandleLocalTreasureFound(DetectableTreasure treasure)
     {
         if (Role == CoopRole.Offline || treasure == null || string.IsNullOrEmpty(treasure.multiplayerId))
@@ -859,6 +1129,7 @@ public class LocalCoopManager : MonoBehaviour
             }
 
             treasure.isFound = true;
+            DigSiteVisual.RemoveForTreasure(treasure);
 
             if (treasure.revealMarker != null)
             {
@@ -970,39 +1241,18 @@ public class LocalCoopManager : MonoBehaviour
         localPlayer = inventory != null ? inventory.transform : null;
     }
 
-    private void MoveLocalPlayerToNetworkSpawn()
-    {
-        CacheLocalPlayer();
-
-        if (localPlayer == null || localPlayerId <= 0)
-        {
-            return;
-        }
-
-        Vector3 offset = new Vector3((localPlayerId - 1) * 1.7f, 0f, 0f);
-        CharacterController characterController = localPlayer.GetComponent<CharacterController>();
-        bool wasEnabled = characterController != null && characterController.enabled;
-
-        if (wasEnabled)
-        {
-            characterController.enabled = false;
-        }
-
-        localPlayer.position += offset;
-
-        if (wasEnabled)
-        {
-            characterController.enabled = true;
-        }
-    }
-
     private RemotePlayer EnsureRemotePlayer(int playerId, string playerName)
     {
         if (remotePlayers.TryGetValue(playerId, out RemotePlayer remotePlayer))
         {
+            if (!string.IsNullOrWhiteSpace(playerName))
+            {
+                remotePlayer.playerName = playerName;
+            }
+
             if (remotePlayer.nameText != null)
             {
-                remotePlayer.nameText.text = playerName;
+                remotePlayer.nameText.text = string.IsNullOrWhiteSpace(remotePlayer.playerName) ? "Player " + playerId : remotePlayer.playerName;
             }
 
             return remotePlayer;
@@ -1038,6 +1288,7 @@ public class LocalCoopManager : MonoBehaviour
             transform = root.transform,
             visualRoot = visual.transform,
             nameText = textMesh,
+            playerName = playerName,
             targetPosition = root.transform.position,
             targetRotation = root.transform.rotation
         };
@@ -1067,8 +1318,16 @@ public class LocalCoopManager : MonoBehaviour
 
         PlayerCharacterSelection.CharacterProfile profile = PlayerCharacterSelection.GetProfile(characterIndex);
 
-        if (UmaCharacterFactory.TryCreateCharacter(remotePlayer.visualRoot, profile, out _))
+        if (UmaCharacterFactory.TryCreateCharacter(remotePlayer.visualRoot, profile, out GameObject remoteAvatarObject))
         {
+            UmaAvatarAnimationDriver animationDriver = remoteAvatarObject.GetComponent<UmaAvatarAnimationDriver>();
+
+            if (animationDriver != null)
+            {
+                animationDriver.useLocalScanInputForSteadyPose = false;
+            }
+
+            remoteAvatarObject.transform.localRotation = Quaternion.identity;
             return;
         }
 
@@ -1196,30 +1455,286 @@ public class LocalCoopManager : MonoBehaviour
         SendToServer(message);
     }
 
-    private string BuildTeamStateMessage()
+    private void UpdateTeamSleepState()
     {
-        PlayerInventory inventory = FindAnyObjectByType<PlayerInventory>();
-        MetalDetector detector = FindAnyObjectByType<MetalDetector>();
-        UpgradeShop shop = FindAnyObjectByType<UpgradeShop>();
-        string unlockedAreas = BuildUnlockedAreasList();
+        if (Role == CoopRole.Offline || !HasTeamSleepVote || DayNightCycle.Instance == null || DayNightCycle.Instance.CanSleep)
+        {
+            return;
+        }
 
-        int money = inventory != null ? inventory.money : 0;
-        int gridSize = inventory != null ? inventory.gridSize : 3;
-        float detectionRange = detector != null ? detector.detectionRange : 6f;
-        int rangeUpgradeCost = shop != null ? shop.rangeUpgradeCost : 75;
-        int inventoryUpgradeCost = shop != null ? shop.inventoryUpgradeCost : 120;
-        int shovelUpgraded = shop != null && shop.shovelUpgraded ? 1 : 0;
+        ClearTeamSleepState(Role == CoopRole.Host);
+    }
+
+    private bool TryFinishTeamSleep(out string statusMessage)
+    {
+        statusMessage = "";
+
+        if (Role != CoopRole.Host || DayNightCycle.Instance == null || !DayNightCycle.Instance.CanSleep)
+        {
+            return false;
+        }
+
+        List<int> requiredPlayerIds = GetRequiredSleepPlayerIds();
+
+        foreach (int playerId in requiredPlayerIds)
+        {
+            if (!sleepReadyPlayerIds.Contains(playerId))
+            {
+                return false;
+            }
+        }
+
+        DayNightCycle.Instance.SleepUntilMorning();
+        ClearTeamSleepState(false);
+        statusMessage = "Everyone slept until morning. Treasures reset.";
+        sleepStatusText = statusMessage;
+        BroadcastFromHost("SLEEP" + MessageSeparator + "DONE" + MessageSeparator + Escape(statusMessage), 0);
+        ReportTeamStateChanged();
+        return true;
+    }
+
+    private void ClearTeamSleepState(bool broadcast)
+    {
+        sleepReadyPlayerIds.Clear();
+        localSleepReady = false;
+        syncedSleepReadyCount = 0;
+        syncedSleepRequiredCount = 0;
+        sleepStatusText = "";
+
+        if (broadcast && Role == CoopRole.Host)
+        {
+            BroadcastFromHost(BuildSleepStateMessage(), 0);
+        }
+    }
+
+    private void UpdateHostSleepStatusText()
+    {
+        sleepStatusText = BuildSleepStatusText(sleepReadyPlayerIds.Count, GetRequiredSleepPlayerIds().Count);
+    }
+
+    private string BuildSleepStateMessage()
+    {
+        int readyCount = Role == CoopRole.Host ? sleepReadyPlayerIds.Count : syncedSleepReadyCount;
+        int requiredCount = Role == CoopRole.Host ? GetRequiredSleepPlayerIds().Count : syncedSleepRequiredCount;
+        string readyIds = Role == CoopRole.Host ? BuildSleepReadyIds() : "";
+        string statusText = Role == CoopRole.Host
+            ? BuildSleepStatusText(readyCount, requiredCount)
+            : sleepStatusText;
 
         return string.Join(
             MessageSeparator,
+            "SLEEP",
+            "STATE",
+            readyCount.ToString(CultureInfo.InvariantCulture),
+            Mathf.Max(1, requiredCount).ToString(CultureInfo.InvariantCulture),
+            Escape(readyIds),
+            Escape(statusText));
+    }
+
+    private string BuildSleepStatusText(int readyCount, int requiredCount)
+    {
+        if (readyCount <= 0)
+        {
+            return "";
+        }
+
+        return "Sleep ready: " + readyCount.ToString(CultureInfo.InvariantCulture) + "/" + Mathf.Max(1, requiredCount).ToString(CultureInfo.InvariantCulture);
+    }
+
+    private string BuildSleepReadyIds()
+    {
+        List<int> ids = new List<int>(sleepReadyPlayerIds);
+        ids.Sort();
+        List<string> parts = new List<string>();
+
+        foreach (int id in ids)
+        {
+            parts.Add(id.ToString(CultureInfo.InvariantCulture));
+        }
+
+        return string.Join(";", parts);
+    }
+
+    private bool IsIdInList(int playerId, string encodedIds)
+    {
+        if (playerId <= 0 || string.IsNullOrEmpty(encodedIds))
+        {
+            return false;
+        }
+
+        string[] ids = Unescape(encodedIds).Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (string id in ids)
+        {
+            if (ParseInt(id) == playerId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private List<int> GetRequiredSleepPlayerIds()
+    {
+        List<int> playerIds = new List<int> { GetHostPlayerId() };
+
+        if (Role != CoopRole.Host)
+        {
+            return playerIds;
+        }
+
+        if (usingSteamTransport)
+        {
+            foreach (int peerId in peerSteamIds.Keys)
+            {
+                if (!playerIds.Contains(peerId))
+                {
+                    playerIds.Add(peerId);
+                }
+            }
+        }
+        else
+        {
+            lock (hostPeers)
+            {
+                foreach (int peerId in hostPeers.Keys)
+                {
+                    if (!playerIds.Contains(peerId))
+                    {
+                        playerIds.Add(peerId);
+                    }
+                }
+            }
+        }
+
+        playerIds.Sort();
+        return playerIds;
+    }
+
+    private int GetHostPlayerId()
+    {
+        return Role == CoopRole.Host && localPlayerId > 0 ? localPlayerId : 1;
+    }
+
+    private string BuildTeamStateMessage()
+    {
+        string unlockedAreas = BuildUnlockedAreasList();
+        List<string> parts = new List<string>
+        {
             "TEAM",
-            money.ToString(CultureInfo.InvariantCulture),
-            gridSize.ToString(CultureInfo.InvariantCulture),
-            FormatFloat(detectionRange),
-            rangeUpgradeCost.ToString(CultureInfo.InvariantCulture),
-            inventoryUpgradeCost.ToString(CultureInfo.InvariantCulture),
-            shovelUpgraded.ToString(CultureInfo.InvariantCulture),
-            Escape(unlockedAreas));
+            Escape(unlockedAreas)
+        };
+
+        if (Role == CoopRole.Host && DayNightCycle.Instance != null)
+        {
+            parts.Add(DayNightCycle.Instance.DayNumber.ToString(CultureInfo.InvariantCulture));
+            parts.Add(DayNightCycle.Instance.IsNight ? "1" : "0");
+            parts.Add(FormatFloat(DayNightCycle.Instance.Phase01));
+        }
+
+        return string.Join(MessageSeparator, parts);
+    }
+
+    private string BuildHomeStorageMessage(PlayerHome home = null)
+    {
+        home ??= FindAnyObjectByType<PlayerHome>();
+        List<string> encodedItems = new List<string>();
+
+        if (home != null)
+        {
+            foreach (PlayerInventory.InventorySlot item in home.ExportStoredItems())
+            {
+                if (item == null)
+                {
+                    continue;
+                }
+
+                encodedItems.Add(string.Join(
+                    HomeItemFieldSeparator,
+                    Escape(item.itemName),
+                    item.value.ToString(CultureInfo.InvariantCulture),
+                    Mathf.Max(1, item.width).ToString(CultureInfo.InvariantCulture),
+                    Mathf.Max(1, item.height).ToString(CultureInfo.InvariantCulture),
+                    Mathf.Max(0, item.gridX).ToString(CultureInfo.InvariantCulture),
+                    Mathf.Max(0, item.gridY).ToString(CultureInfo.InvariantCulture)));
+            }
+        }
+
+        return "HOME" + MessageSeparator + string.Join(HomeItemSeparator, encodedItems);
+    }
+
+    private List<PlayerInventory.InventorySlot> DecodeHomeStorageItems(string payload)
+    {
+        List<PlayerInventory.InventorySlot> items = new List<PlayerInventory.InventorySlot>();
+
+        if (string.IsNullOrEmpty(payload))
+        {
+            return items;
+        }
+
+        string[] encodedItems = payload.Split(new[] { HomeItemSeparator }, StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (string encodedItem in encodedItems)
+        {
+            string[] fields = encodedItem.Split(new[] { HomeItemFieldSeparator }, StringSplitOptions.None);
+
+            if (fields.Length < 4)
+            {
+                continue;
+            }
+
+            string itemName = Unescape(fields[0]);
+            int value = ParseInt(fields[1]);
+            int width = Mathf.Max(1, ParseInt(fields[2]));
+            int height = Mathf.Max(1, ParseInt(fields[3]));
+
+            items.Add(new PlayerInventory.InventorySlot
+            {
+                itemName = itemName,
+                value = value,
+                icon = FindTreasureIcon(itemName),
+                width = width,
+                height = height,
+                gridX = fields.Length > 4 ? Mathf.Max(0, ParseInt(fields[4])) : 0,
+                gridY = fields.Length > 5 ? Mathf.Max(0, ParseInt(fields[5])) : 0
+            });
+        }
+
+        return items;
+    }
+
+    private Sprite FindTreasureIcon(string itemName)
+    {
+        TreasureSpawner spawner = FindAnyObjectByType<TreasureSpawner>();
+        TreasureDatabase database = spawner != null ? spawner.treasureDatabase : null;
+
+        if (database == null)
+        {
+            return null;
+        }
+
+        return FindIconInDefinitions(database.treasures, itemName)
+            ?? FindIconInDefinitions(database.generalTerrainTreasures, itemName)
+            ?? FindIconInDefinitions(database.searchAreaTreasures, itemName);
+    }
+
+    private Sprite FindIconInDefinitions(TreasureDefinition[] definitions, string itemName)
+    {
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        foreach (TreasureDefinition definition in definitions)
+        {
+            if (definition != null && definition.treasureName == itemName)
+            {
+                return definition.icon;
+            }
+        }
+
+        return null;
     }
 
     private string BuildUnlockedAreasList()
@@ -1503,14 +2018,14 @@ public class LocalCoopManager : MonoBehaviour
     {
         return string.IsNullOrEmpty(value)
             ? ""
-            : value.Replace("%", "%25").Replace("|", "%7C").Replace("\n", "").Replace("\r", "");
+            : value.Replace("%", "%25").Replace("|", "%7C").Replace(";", "%3B").Replace("~", "%7E").Replace("\n", "").Replace("\r", "");
     }
 
     private string Unescape(string value)
     {
         return string.IsNullOrEmpty(value)
             ? ""
-            : value.Replace("%7C", "|").Replace("%25", "%");
+            : value.Replace("%7C", "|").Replace("%3B", ";").Replace("%7E", "~").Replace("%25", "%");
     }
 
     private string CleanPlayerName(string playerName)

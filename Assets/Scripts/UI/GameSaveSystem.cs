@@ -1,0 +1,863 @@
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+public static class GameSaveSystem
+{
+    private const string SaveKey = "MetalDetector.Save.Json";
+
+    private static GameSaveData initialDefaults;
+    private static GameSaveData pauseResumeSnapshot;
+
+    public static bool HasSavedGame => PlayerPrefs.HasKey(SaveKey);
+    public static bool HasPauseResumeSnapshot => pauseResumeSnapshot != null;
+
+    public static void CaptureInitialDefaults()
+    {
+        if (initialDefaults != null)
+        {
+            return;
+        }
+
+        initialDefaults = CaptureCurrentData();
+    }
+
+    public static void StartNewGame()
+    {
+        pauseResumeSnapshot = null;
+        ClearSavedGame();
+        ResetRuntimeToDefaults();
+    }
+
+    public static bool ContinueGame(out string message)
+    {
+        if (pauseResumeSnapshot != null)
+        {
+            ApplyData(pauseResumeSnapshot, true);
+            pauseResumeSnapshot = null;
+            message = "Continued paused solo session.";
+            return true;
+        }
+
+        if (!HasSavedGame)
+        {
+            message = "No save file yet. Starting fresh.";
+            ResetRuntimeToDefaults();
+            return false;
+        }
+
+        string json = PlayerPrefs.GetString(SaveKey, "");
+
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            message = "Save file is empty. Starting fresh.";
+            ResetRuntimeToDefaults();
+            return false;
+        }
+
+        GameSaveData data = JsonUtility.FromJson<GameSaveData>(json);
+
+        if (data == null)
+        {
+            message = "Save file could not be loaded. Starting fresh.";
+            ResetRuntimeToDefaults();
+            return false;
+        }
+
+        ApplyData(data, true);
+        message = string.IsNullOrEmpty(data.savedAt) ? "Save loaded." : "Loaded save from " + data.savedAt + ".";
+        return true;
+    }
+
+    public static bool SaveCurrentGame(out string message)
+    {
+        LocalCoopManager coopManager = LocalCoopManager.Instance;
+
+        GameSaveData data = CaptureCurrentData();
+        data.savedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        PlayerPrefs.SetString(SaveKey, JsonUtility.ToJson(data));
+        PlayerPrefs.Save();
+        message = coopManager != null && (coopManager.IsRunning || coopManager.RemotePlayerCount > 0)
+            ? "Multiplayer game saved."
+            : "Game saved.";
+        return true;
+    }
+
+    public static void CapturePauseResumeSnapshotIfSolo()
+    {
+        LocalCoopManager coopManager = LocalCoopManager.Instance;
+
+        if (coopManager != null && coopManager.IsRunning)
+        {
+            pauseResumeSnapshot = null;
+            return;
+        }
+
+        pauseResumeSnapshot = CaptureCurrentData();
+    }
+
+    public static void ClearPauseResumeSnapshot()
+    {
+        pauseResumeSnapshot = null;
+    }
+
+    public static void ClearSavedGame()
+    {
+        if (PlayerPrefs.HasKey(SaveKey))
+        {
+            PlayerPrefs.DeleteKey(SaveKey);
+            PlayerPrefs.Save();
+        }
+    }
+
+    private static void ResetRuntimeToDefaults()
+    {
+        GameSaveData defaults = initialDefaults ?? CaptureCurrentData();
+        GameSaveData resetData = defaults.Clone();
+        resetData.savedAt = "";
+        resetData.inventoryItems.Clear();
+        resetData.homeStoredItems.Clear();
+        resetData.completedNpcQuestIds.Clear();
+        resetData.unlockedSearchAreaIds.Clear();
+        resetData.treasures.Clear();
+        resetData.remotePlayers.Clear();
+        resetData.wasMultiplayer = false;
+        ApplyData(resetData, false);
+
+        TreasureSpawner spawner = UnityEngine.Object.FindAnyObjectByType<TreasureSpawner>();
+
+        if (spawner != null)
+        {
+            spawner.RegenerateTreasures();
+        }
+    }
+
+    private static GameSaveData CaptureCurrentData()
+    {
+        GameSaveData data = new GameSaveData();
+        CapturePlayer(data);
+        CaptureInventory(data);
+        CaptureDetector(data);
+        CaptureShop(data);
+        CaptureDayNight(data);
+        CaptureSearchAreas(data);
+        CaptureTreasures(data);
+        CaptureHome(data);
+        CaptureNpcQuests(data);
+        CaptureMultiplayer(data);
+        return data;
+    }
+
+    private static void CapturePlayer(GameSaveData data)
+    {
+        Transform player = PlayerRigReferences.FindLocalPlayerTransform();
+
+        if (player == null)
+        {
+            return;
+        }
+
+        data.hasPlayerTransform = true;
+        data.playerPosition = SerializableVector3.FromVector3(player.position);
+        data.playerYaw = player.eulerAngles.y;
+    }
+
+    private static void CaptureInventory(GameSaveData data)
+    {
+        PlayerInventory inventory = PlayerRigReferences.FindLocalInventory();
+
+        if (inventory == null)
+        {
+            return;
+        }
+
+        data.money = inventory.money;
+        data.gridSize = inventory.gridSize;
+        data.maxGridSize = inventory.maxGridSize;
+        data.inventoryItems = CaptureItems(inventory.items);
+    }
+
+    private static void CaptureDetector(GameSaveData data)
+    {
+        MetalDetector detector = PlayerRigReferences.FindLocalMetalDetector();
+
+        if (detector != null)
+        {
+            data.detectorRange = detector.detectionRange;
+            data.detectorTier = detector.detectorTier;
+        }
+
+        DetectorBattery battery = PlayerRigReferences.FindLocalDetectorBattery();
+
+        if (battery != null)
+        {
+            data.detectorBatteryCharge = battery.charge;
+        }
+    }
+
+    private static void CaptureShop(GameSaveData data)
+    {
+        UpgradeShop shop = FindUpgradeShop();
+
+        if (shop == null)
+        {
+            return;
+        }
+
+        data.detectorUpgradeCost = shop.detectorUpgradeCost;
+        data.rangeUpgradeCost = shop.rangeUpgradeCost;
+        data.inventoryUpgradeCost = shop.inventoryUpgradeCost;
+        data.shovelUpgradeCost = shop.shovelUpgradeCost;
+        data.shovelUpgraded = shop.shovelUpgraded;
+    }
+
+    private static void CaptureDayNight(GameSaveData data)
+    {
+        DayNightCycle cycle = DayNightCycle.Instance;
+
+        if (cycle == null)
+        {
+            return;
+        }
+
+        data.dayNumber = cycle.DayNumber;
+        data.isNight = cycle.IsNight;
+        data.phase01 = cycle.Phase01;
+    }
+
+    private static void CaptureSearchAreas(GameSaveData data)
+    {
+        SearchArea[] areas = UnityEngine.Object.FindObjectsByType<SearchArea>();
+
+        foreach (SearchArea area in areas)
+        {
+            if (area != null && area.isUnlocked)
+            {
+                data.unlockedSearchAreaIds.Add(area.MultiplayerId);
+            }
+        }
+
+        data.unlockedSearchAreaIds.Sort(StringComparer.Ordinal);
+    }
+
+    private static void CaptureTreasures(GameSaveData data)
+    {
+        DetectableTreasure[] treasures = UnityEngine.Object.FindObjectsByType<DetectableTreasure>();
+
+        foreach (DetectableTreasure treasure in treasures)
+        {
+            if (treasure == null || string.IsNullOrEmpty(treasure.multiplayerId))
+            {
+                continue;
+            }
+
+            data.treasures.Add(new SavedTreasure
+            {
+                id = treasure.multiplayerId,
+                itemName = treasure.treasureName,
+                value = treasure.value,
+                rarity = treasure.rarity,
+                position = SerializableVector3.FromVector3(treasure.transform.position),
+                width = 1,
+                height = 1,
+                requiredDigHits = treasure.requiredDigHits,
+                currentDigHits = treasure.currentDigHits,
+                isRevealed = treasure.isRevealed,
+                isFound = treasure.isFound
+            });
+        }
+    }
+
+    private static void CaptureHome(GameSaveData data)
+    {
+        PlayerHome home = UnityEngine.Object.FindAnyObjectByType<PlayerHome>();
+
+        if (home != null)
+        {
+            data.homeStoredItems = CaptureItems(home.ExportStoredItems());
+        }
+    }
+
+    private static void CaptureNpcQuests(GameSaveData data)
+    {
+        NpcQuestGiver questGiver = UnityEngine.Object.FindAnyObjectByType<NpcQuestGiver>();
+
+        if (questGiver == null)
+        {
+            return;
+        }
+
+        data.completedNpcQuestIds = questGiver.GetCompletedQuestIds();
+    }
+
+    private static void CaptureMultiplayer(GameSaveData data)
+    {
+        LocalCoopManager coopManager = LocalCoopManager.Instance;
+
+        if (coopManager == null)
+        {
+            return;
+        }
+
+        data.wasMultiplayer = coopManager.IsRunning || coopManager.RemotePlayerCount > 0;
+        data.localPlayerId = coopManager.LocalPlayerId;
+        data.coopRole = (int)coopManager.Role;
+        data.remotePlayers.Clear();
+
+        foreach (LocalCoopManager.SavedRemotePlayerState remotePlayer in coopManager.CaptureRemotePlayerStates())
+        {
+            data.remotePlayers.Add(new SavedRemotePlayer
+            {
+                playerId = remotePlayer.playerId,
+                playerName = remotePlayer.playerName,
+                position = SerializableVector3.FromVector3(remotePlayer.position),
+                rotation = SerializableQuaternion.FromQuaternion(remotePlayer.rotation),
+                characterIndex = remotePlayer.characterIndex
+            });
+        }
+    }
+
+    private static List<SavedInventoryItem> CaptureItems(IList<PlayerInventory.InventorySlot> items)
+    {
+        List<SavedInventoryItem> savedItems = new List<SavedInventoryItem>();
+
+        if (items == null)
+        {
+            return savedItems;
+        }
+
+        foreach (PlayerInventory.InventorySlot item in items)
+        {
+            if (item == null)
+            {
+                continue;
+            }
+
+            savedItems.Add(new SavedInventoryItem
+            {
+                itemName = item.itemName,
+                value = item.value,
+                width = item.width,
+                height = item.height,
+                gridX = item.gridX,
+                gridY = item.gridY
+            });
+        }
+
+        return savedItems;
+    }
+
+    private static void ApplyData(GameSaveData data, bool restoreSavedTreasures)
+    {
+        if (data == null)
+        {
+            return;
+        }
+
+        ApplyPlayer(data);
+        ApplyInventory(data);
+        ApplyDetector(data);
+        ApplyShop(data);
+        ApplyDayNight(data);
+        ApplySearchAreas(data);
+
+        if (restoreSavedTreasures)
+        {
+            RestoreTreasures(data);
+        }
+
+        ApplyHome(data);
+        ApplyNpcQuests(data);
+        ApplyMultiplayer(data);
+    }
+
+    private static void ApplyPlayer(GameSaveData data)
+    {
+        if (!data.hasPlayerTransform)
+        {
+            return;
+        }
+
+        Transform player = PlayerRigReferences.FindLocalPlayerTransform();
+
+        if (player == null)
+        {
+            return;
+        }
+
+        CharacterController controller = player.GetComponent<CharacterController>();
+        bool wasEnabled = controller != null && controller.enabled;
+
+        if (wasEnabled)
+        {
+            controller.enabled = false;
+        }
+
+        player.position = data.playerPosition.ToVector3();
+        player.rotation = Quaternion.Euler(0f, data.playerYaw, 0f);
+
+        if (wasEnabled)
+        {
+            controller.enabled = true;
+        }
+    }
+
+    private static void ApplyInventory(GameSaveData data)
+    {
+        PlayerInventory inventory = PlayerRigReferences.FindLocalInventory();
+
+        if (inventory == null)
+        {
+            return;
+        }
+
+        inventory.SetOpen(false);
+        inventory.money = Mathf.Max(0, data.money);
+        inventory.maxGridSize = Mathf.Max(3, data.maxGridSize);
+        inventory.gridSize = Mathf.Clamp(data.gridSize <= 0 ? 3 : data.gridSize, 3, inventory.maxGridSize);
+        inventory.items.Clear();
+
+        foreach (SavedInventoryItem item in data.inventoryItems)
+        {
+            inventory.items.Add(CreateInventorySlot(item));
+        }
+    }
+
+    private static void ApplyDetector(GameSaveData data)
+    {
+        MetalDetector detector = PlayerRigReferences.FindLocalMetalDetector();
+
+        if (detector != null)
+        {
+            detector.detectionRange = data.detectorRange > 0f ? data.detectorRange : 6f;
+            detector.detectorTier = Mathf.Max(0, data.detectorTier);
+        }
+
+        DetectorBattery battery = PlayerRigReferences.FindLocalDetectorBattery();
+
+        if (battery != null)
+        {
+            battery.charge = Mathf.Clamp(data.detectorBatteryCharge > 0f ? data.detectorBatteryCharge : battery.maxCharge, 0f, battery.maxCharge);
+        }
+    }
+
+    private static void ApplyShop(GameSaveData data)
+    {
+        UpgradeShop shop = FindUpgradeShop();
+
+        if (shop == null)
+        {
+            return;
+        }
+
+        shop.detectorUpgradeCost = data.detectorUpgradeCost > 0 ? data.detectorUpgradeCost : 75;
+        shop.rangeUpgradeCost = data.rangeUpgradeCost > 0 ? data.rangeUpgradeCost : 75;
+        shop.inventoryUpgradeCost = data.inventoryUpgradeCost > 0 ? data.inventoryUpgradeCost : 120;
+        shop.shovelUpgradeCost = data.shovelUpgradeCost > 0 ? data.shovelUpgradeCost : 160;
+        shop.shovelUpgraded = data.shovelUpgraded;
+        shop.SetMenuOpen(false);
+    }
+
+    private static UpgradeShop FindUpgradeShop()
+    {
+        UpgradeShop[] shops = UnityEngine.Object.FindObjectsByType<UpgradeShop>(FindObjectsInactive.Include);
+
+        foreach (UpgradeShop shop in shops)
+        {
+            if (shop != null && shop.CanUpgradeHere)
+            {
+                return shop;
+            }
+        }
+
+        return shops.Length > 0 ? shops[0] : null;
+    }
+
+    private static void ApplyDayNight(GameSaveData data)
+    {
+        if (DayNightCycle.Instance != null)
+        {
+            DayNightCycle.Instance.ApplySavedState(Mathf.Max(1, data.dayNumber), data.isNight, data.phase01);
+        }
+    }
+
+    private static void ApplySearchAreas(GameSaveData data)
+    {
+        HashSet<string> unlockedIds = new HashSet<string>(data.unlockedSearchAreaIds ?? new List<string>());
+        SearchArea[] areas = UnityEngine.Object.FindObjectsByType<SearchArea>();
+
+        foreach (SearchArea area in areas)
+        {
+            if (area == null)
+            {
+                continue;
+            }
+
+            area.ClearTreasureSpawnState();
+            area.SetUnlocked(unlockedIds.Contains(area.MultiplayerId), false);
+        }
+    }
+
+    private static void RestoreTreasures(GameSaveData data)
+    {
+        TreasureSpawner spawner = UnityEngine.Object.FindAnyObjectByType<TreasureSpawner>();
+
+        if (spawner == null)
+        {
+            return;
+        }
+
+        spawner.ClearSpawnedTreasures();
+
+        foreach (SavedTreasure treasure in data.treasures)
+        {
+            RestoreTreasure(spawner, treasure);
+        }
+
+        SearchArea[] areas = UnityEngine.Object.FindObjectsByType<SearchArea>();
+
+        foreach (SearchArea area in areas)
+        {
+            if (area != null && area.isUnlocked)
+            {
+                area.MarkTreasuresSpawned();
+            }
+        }
+    }
+
+    private static void RestoreTreasure(TreasureSpawner spawner, SavedTreasure savedTreasure)
+    {
+        if (savedTreasure == null || string.IsNullOrEmpty(savedTreasure.id))
+        {
+            return;
+        }
+
+        GameObject treasureObject = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        treasureObject.name = "Treasure - " + savedTreasure.itemName;
+        treasureObject.transform.SetParent(spawner.transform);
+        treasureObject.transform.position = savedTreasure.position.ToVector3();
+        treasureObject.transform.localScale = Vector3.one * 0.25f;
+
+        DetectableTreasure treasure = treasureObject.AddComponent<DetectableTreasure>();
+        treasure.multiplayerId = savedTreasure.id;
+        treasure.treasureName = savedTreasure.itemName;
+        treasure.value = savedTreasure.value;
+        treasure.rarity = savedTreasure.rarity;
+        treasure.inventoryWidth = 1;
+        treasure.inventoryHeight = 1;
+        treasure.requiredDigHits = Mathf.Max(1, savedTreasure.requiredDigHits);
+        treasure.currentDigHits = Mathf.Clamp(savedTreasure.currentDigHits, 0, treasure.requiredDigHits);
+        treasure.isRevealed = savedTreasure.isRevealed;
+        treasure.isFound = savedTreasure.isFound;
+        treasure.icon = PlayerInventory.ResolveItemIcon(savedTreasure.itemName, FindTreasureIcon(savedTreasure.itemName));
+
+        Renderer treasureRenderer = treasureObject.GetComponent<Renderer>();
+
+        if (treasureRenderer != null)
+        {
+            treasureRenderer.enabled = spawner.showDebugTreasures && !treasure.isFound;
+        }
+
+        Collider treasureCollider = treasureObject.GetComponent<Collider>();
+
+        if (treasureCollider != null && treasure.isFound)
+        {
+            treasureCollider.enabled = false;
+        }
+    }
+
+    private static void ApplyHome(GameSaveData data)
+    {
+        PlayerHome home = UnityEngine.Object.FindAnyObjectByType<PlayerHome>();
+
+        if (home == null)
+        {
+            return;
+        }
+
+        List<PlayerInventory.InventorySlot> storedItems = new List<PlayerInventory.InventorySlot>();
+
+        foreach (SavedInventoryItem item in data.homeStoredItems)
+        {
+            storedItems.Add(CreateInventorySlot(item));
+        }
+
+        home.ImportStoredItems(storedItems);
+        home.SetMenuOpen(false);
+    }
+
+    private static void ApplyNpcQuests(GameSaveData data)
+    {
+        NpcQuestGiver questGiver = UnityEngine.Object.FindAnyObjectByType<NpcQuestGiver>();
+
+        if (questGiver == null)
+        {
+            return;
+        }
+
+        questGiver.SetMenuOpen(false);
+        questGiver.ApplyCompletedQuestIds(data.completedNpcQuestIds);
+    }
+
+    private static void ApplyMultiplayer(GameSaveData data)
+    {
+        LocalCoopManager coopManager = LocalCoopManager.Instance;
+
+        if (coopManager == null)
+        {
+            return;
+        }
+
+        List<LocalCoopManager.SavedRemotePlayerState> remotePlayerStates = new List<LocalCoopManager.SavedRemotePlayerState>();
+        List<SavedRemotePlayer> savedRemotePlayers = data.remotePlayers ?? new List<SavedRemotePlayer>();
+
+        foreach (SavedRemotePlayer remotePlayer in savedRemotePlayers)
+        {
+            if (remotePlayer == null)
+            {
+                continue;
+            }
+
+            remotePlayerStates.Add(new LocalCoopManager.SavedRemotePlayerState
+            {
+                playerId = remotePlayer.playerId,
+                playerName = remotePlayer.playerName,
+                position = remotePlayer.position.ToVector3(),
+                rotation = remotePlayer.rotation.ToQuaternion(),
+                characterIndex = remotePlayer.characterIndex
+            });
+        }
+
+        if (data.wasMultiplayer || remotePlayerStates.Count > 0)
+        {
+            coopManager.RestoreSavedRemotePlayerStates(remotePlayerStates);
+            return;
+        }
+
+        if (!coopManager.IsRunning && coopManager.RemotePlayerCount > 0)
+        {
+            coopManager.ClearRemotePlayerVisuals();
+        }
+    }
+
+    private static PlayerInventory.InventorySlot CreateInventorySlot(SavedInventoryItem item)
+    {
+        bool isTreasureItem = IsKnownTreasureItem(item.itemName);
+
+        return new PlayerInventory.InventorySlot
+        {
+            itemName = item.itemName,
+            value = item.value,
+            icon = PlayerInventory.ResolveItemIcon(item.itemName, FindTreasureIcon(item.itemName)),
+            width = isTreasureItem ? 1 : Mathf.Max(1, item.width),
+            height = isTreasureItem ? 1 : Mathf.Max(1, item.height),
+            gridX = Mathf.Max(0, item.gridX),
+            gridY = Mathf.Max(0, item.gridY)
+        };
+    }
+
+    private static Sprite FindTreasureIcon(string itemName)
+    {
+        TreasureDatabase database = FindTreasureDatabase();
+
+        if (database == null)
+        {
+            return null;
+        }
+
+        return FindIconInDefinitions(database.treasures, itemName)
+            ?? FindIconInDefinitions(database.generalTerrainTreasures, itemName)
+            ?? FindIconInDefinitions(database.searchAreaTreasures, itemName);
+    }
+
+    private static bool IsKnownTreasureItem(string itemName)
+    {
+        TreasureDatabase database = FindTreasureDatabase();
+
+        if (database == null)
+        {
+            return IsRuntimeDefaultTreasureName(itemName);
+        }
+
+        return HasTreasureDefinition(database.treasures, itemName)
+            || HasTreasureDefinition(database.generalTerrainTreasures, itemName)
+            || HasTreasureDefinition(database.searchAreaTreasures, itemName);
+    }
+
+    private static TreasureDatabase FindTreasureDatabase()
+    {
+        TreasureSpawner spawner = UnityEngine.Object.FindAnyObjectByType<TreasureSpawner>();
+        return spawner != null ? spawner.treasureDatabase : null;
+    }
+
+    private static bool HasTreasureDefinition(TreasureDefinition[] definitions, string itemName)
+    {
+        if (definitions == null)
+        {
+            return false;
+        }
+
+        foreach (TreasureDefinition definition in definitions)
+        {
+            if (definition != null && definition.treasureName == itemName)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsRuntimeDefaultTreasureName(string itemName)
+    {
+        switch (itemName)
+        {
+            case "Rusty Bottle Cap":
+            case "Old Nail":
+            case "Pull Tab":
+            case "Crushed Can":
+            case "Small Coin":
+            case "Bent Spoon":
+            case "Lost Key":
+            case "Watch Fragment":
+            case "Pocket Watch":
+            case "Silver Ring":
+            case "Old Dagger":
+            case "Gold Ring":
+            case "Jeweled Compass":
+            case "Ancient Relic":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static Sprite FindIconInDefinitions(TreasureDefinition[] definitions, string itemName)
+    {
+        if (definitions == null)
+        {
+            return null;
+        }
+
+        foreach (TreasureDefinition definition in definitions)
+        {
+            if (definition != null && definition.treasureName == itemName)
+            {
+                return definition.icon;
+            }
+        }
+
+        return null;
+    }
+
+    [Serializable]
+    private class GameSaveData
+    {
+        public string savedAt = "";
+        public bool hasPlayerTransform;
+        public SerializableVector3 playerPosition;
+        public float playerYaw;
+        public int money;
+        public int gridSize = 3;
+        public int maxGridSize = 5;
+        public List<SavedInventoryItem> inventoryItems = new List<SavedInventoryItem>();
+        public float detectorRange = 6f;
+        public int detectorTier;
+        public float detectorBatteryCharge = 100f;
+        public int detectorUpgradeCost = 75;
+        public int rangeUpgradeCost = 75;
+        public int inventoryUpgradeCost = 120;
+        public int shovelUpgradeCost = 160;
+        public bool shovelUpgraded;
+        public int dayNumber = 1;
+        public bool isNight;
+        public float phase01;
+        public List<string> unlockedSearchAreaIds = new List<string>();
+        public List<SavedTreasure> treasures = new List<SavedTreasure>();
+        public List<SavedInventoryItem> homeStoredItems = new List<SavedInventoryItem>();
+        public List<string> completedNpcQuestIds = new List<string>();
+        public bool wasMultiplayer;
+        public int localPlayerId;
+        public int coopRole;
+        public List<SavedRemotePlayer> remotePlayers = new List<SavedRemotePlayer>();
+
+        public GameSaveData Clone()
+        {
+            return JsonUtility.FromJson<GameSaveData>(JsonUtility.ToJson(this));
+        }
+    }
+
+    [Serializable]
+    private class SavedInventoryItem
+    {
+        public string itemName;
+        public int value;
+        public int width = 1;
+        public int height = 1;
+        public int gridX;
+        public int gridY;
+    }
+
+    [Serializable]
+    private class SavedTreasure
+    {
+        public string id;
+        public string itemName;
+        public int value;
+        public TreasureRarity rarity;
+        public SerializableVector3 position;
+        public int width = 1;
+        public int height = 1;
+        public int requiredDigHits = 3;
+        public int currentDigHits;
+        public bool isRevealed;
+        public bool isFound;
+    }
+
+    [Serializable]
+    private class SavedRemotePlayer
+    {
+        public int playerId;
+        public string playerName;
+        public SerializableVector3 position;
+        public SerializableQuaternion rotation;
+        public int characterIndex;
+    }
+
+    [Serializable]
+    private struct SerializableVector3
+    {
+        public float x;
+        public float y;
+        public float z;
+
+        public static SerializableVector3 FromVector3(Vector3 value)
+        {
+            return new SerializableVector3 { x = value.x, y = value.y, z = value.z };
+        }
+
+        public Vector3 ToVector3()
+        {
+            return new Vector3(x, y, z);
+        }
+    }
+
+    [Serializable]
+    private struct SerializableQuaternion
+    {
+        public float x;
+        public float y;
+        public float z;
+        public float w;
+
+        public static SerializableQuaternion FromQuaternion(Quaternion value)
+        {
+            return new SerializableQuaternion { x = value.x, y = value.y, z = value.z, w = value.w };
+        }
+
+        public Quaternion ToQuaternion()
+        {
+            return new Quaternion(x, y, z, w == 0f ? 1f : w);
+        }
+    }
+}

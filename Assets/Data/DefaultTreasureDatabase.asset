@@ -76,6 +76,15 @@ MonoBehaviour:
     height: 1
     minDigHits: 4
     maxDigHits: 6
+  - treasureName: Watch Fragment
+    value: 14
+    rarity: 0
+    icon: {fileID: 21300000, guid: 811fec43faf3bbf4b901af16312b9499, type: 3}
+    spawnWeight: 16
+    width: 1
+    height: 1
+    minDigHits: 3
+    maxDigHits: 4
   - treasureName: Silver Ring
     value: 54
     rarity: 1

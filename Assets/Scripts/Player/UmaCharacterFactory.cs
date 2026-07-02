@@ -57,7 +57,7 @@ public static class UmaCharacterFactory
         characterObject.name = profile.displayName;
         characterObject.transform.SetParent(parent, false);
         characterObject.transform.localPosition = Vector3.zero;
-        characterObject.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+        characterObject.transform.localRotation = Quaternion.identity;
         characterObject.transform.localScale = Vector3.one;
 
         DynamicCharacterAvatar avatar = characterObject.GetComponent<DynamicCharacterAvatar>();
@@ -203,7 +203,7 @@ public static class UmaCharacterFactory
         return HasRenderableVisual(characterObject);
     }
 
-    private static bool EnsureRuntime()
+    public static bool EnsureRuntime()
     {
         if (UMAContextBase.Instance != null)
         {
@@ -212,6 +212,14 @@ public static class UmaCharacterFactory
 
         if (umaRuntime == null)
         {
+            UMAContextBase existingContext = FindExistingRuntimeContext();
+
+            if (existingContext != null)
+            {
+                umaRuntime = existingContext.gameObject;
+                return true;
+            }
+
             GameObject runtimePrefab = Resources.Load<GameObject>(UmaRuntimeResourcePath);
 
             if (runtimePrefab == null)
@@ -221,11 +229,26 @@ public static class UmaCharacterFactory
             }
 
             umaRuntime = Object.Instantiate(runtimePrefab);
-            umaRuntime.name = "UMA Runtime";
+            umaRuntime.name = "UMA_GLIB";
             Object.DontDestroyOnLoad(umaRuntime);
         }
 
-        return UMAContextBase.Instance != null;
+        return UMAContextBase.Instance != null || FindExistingRuntimeContext() != null;
+    }
+
+    private static UMAContextBase FindExistingRuntimeContext()
+    {
+        UMAContextBase[] contexts = Object.FindObjectsByType<UMAContextBase>(FindObjectsInactive.Include);
+
+        for (int i = 0; i < contexts.Length; i++)
+        {
+            if (contexts[i] != null)
+            {
+                return contexts[i];
+            }
+        }
+
+        return null;
     }
 
     private static void DestroyCharacterObject(GameObject target)

@@ -11,6 +11,8 @@ public class TreasureSpawner : MonoBehaviour
 
     public int treasureCount = 80;
     public int treasuresPerUnlockedArea = 120;
+    public int generalTerrainTreasureCount = 180;
+    public int maxGeneralSpawnAttemptsPerTreasure = 24;
     public int deterministicSeed = 420777;
     public Vector2 mapSize = new Vector2(1000f, 1000f);
     public float buriedYPosition = -0.25f;
@@ -84,6 +86,28 @@ public class TreasureSpawner : MonoBehaviour
         }
     }
 
+    public void RegenerateTreasures()
+    {
+        RegenerateTreasures(0);
+    }
+
+    public void RegenerateTreasures(int daySeedOffset)
+    {
+        ClearSpawnedTreasures();
+
+        SearchArea[] searchAreas = FindObjectsByType<SearchArea>();
+
+        foreach (SearchArea searchArea in searchAreas)
+        {
+            if (searchArea != null)
+            {
+                searchArea.ClearTreasureSpawnState();
+            }
+        }
+
+        SpawnTreasures(daySeedOffset);
+    }
+
     private void CreateSearchAreaMarker()
     {
         if (!showSearchAreaBounds)
@@ -148,6 +172,11 @@ public class TreasureSpawner : MonoBehaviour
 
     private void SpawnTreasures()
     {
+        SpawnTreasures(0);
+    }
+
+    private void SpawnTreasures(int seedOffset)
+    {
         EnsureTreasureDatabase();
 
         if ((treasureDatabase == null || treasureDatabase.treasures == null || treasureDatabase.treasures.Length == 0)
@@ -158,13 +187,14 @@ public class TreasureSpawner : MonoBehaviour
         }
 
         Random.State previousRandomState = Random.state;
-        Random.InitState(deterministicSeed);
+        Random.InitState(deterministicSeed + seedOffset * 9973);
         nextTreasureId = 0;
 
         try
         {
             SearchArea[] searchAreas = FindObjectsByType<SearchArea>();
             System.Array.Sort(searchAreas, CompareSearchAreas);
+            SpawnGeneralTerrainTreasures(searchAreas);
 
             if (searchAreas.Length > 0)
             {
@@ -174,11 +204,6 @@ public class TreasureSpawner : MonoBehaviour
                 }
 
                 return;
-            }
-
-            for (int i = 0; i < treasureCount; i++)
-            {
-                SpawnTreasureAt(GetRandomLegacyPosition());
             }
         }
         finally
@@ -227,7 +252,37 @@ public class TreasureSpawner : MonoBehaviour
     {
         for (int i = 0; i < count; i++)
         {
-            SpawnTreasureAt(area.GetRandomPoint(buriedYPosition));
+            SpawnTreasureAt(area.GetRandomPoint(buriedYPosition), TreasureLootPool.SearchArea);
+        }
+    }
+
+    private void SpawnGeneralTerrainTreasures(SearchArea[] searchAreas)
+    {
+        int targetCount = Mathf.Max(0, generalTerrainTreasureCount > 0 ? generalTerrainTreasureCount : treasureCount);
+        int maxAttempts = Mathf.Max(1, maxGeneralSpawnAttemptsPerTreasure);
+
+        for (int i = 0; i < targetCount; i++)
+        {
+            bool spawned = false;
+
+            for (int attempt = 0; attempt < maxAttempts; attempt++)
+            {
+                Vector3 position = GetRandomLegacyPosition();
+
+                if (IsInsideAnySearchArea(position, searchAreas))
+                {
+                    continue;
+                }
+
+                SpawnTreasureAt(position, TreasureLootPool.GeneralTerrain);
+                spawned = true;
+                break;
+            }
+
+            if (!spawned && (searchAreas == null || searchAreas.Length == 0))
+            {
+                SpawnTreasureAt(GetRandomLegacyPosition(), TreasureLootPool.GeneralTerrain);
+            }
         }
     }
 
@@ -240,11 +295,29 @@ public class TreasureSpawner : MonoBehaviour
         );
     }
 
-    private void SpawnTreasureAt(Vector3 position)
+    private bool IsInsideAnySearchArea(Vector3 position, SearchArea[] searchAreas)
+    {
+        if (searchAreas == null)
+        {
+            return false;
+        }
+
+        foreach (SearchArea searchArea in searchAreas)
+        {
+            if (searchArea != null && searchArea.Contains(position))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void SpawnTreasureAt(Vector3 position, TreasureLootPool lootPool)
     {
         position = GetBuriedPosition(position);
 
-        TreasureDefinition definition = treasureDatabase != null ? treasureDatabase.GetRandomTreasure() : null;
+        TreasureDefinition definition = treasureDatabase != null ? treasureDatabase.GetRandomTreasure(lootPool) : null;
         TreasureOption option = definition == null && treasureOptions != null && treasureOptions.Length > 0
             ? treasureOptions[Random.Range(0, treasureOptions.Length)]
             : null;

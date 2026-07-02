@@ -91,6 +91,12 @@ public class SearchArea : MonoBehaviour
         hasSpawnedTreasures = true;
     }
 
+    public void ClearTreasureSpawnState()
+    {
+        hasSpawnedTreasures = false;
+        RefreshVisualState();
+    }
+
     public bool CanSpawnTreasures()
     {
         return isUnlocked && !hasSpawnedTreasures;

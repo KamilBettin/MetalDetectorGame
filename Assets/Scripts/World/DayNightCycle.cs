@@ -46,11 +46,11 @@ public class DayNightCycle : MonoBehaviour
     {
         phaseTimer += Time.deltaTime;
 
-        if (!isNight && phaseTimer >= dayDurationSeconds)
+        if (!IsRemoteClientClock() && !isNight && phaseTimer >= dayDurationSeconds)
         {
             StartNight();
         }
-        else if (isNight && phaseTimer >= nightDurationSeconds)
+        else if (!IsRemoteClientClock() && isNight && phaseTimer >= nightDurationSeconds)
         {
             FinishNightAndStartMorning("Morning came. Treasures reset.");
         }
@@ -68,6 +68,23 @@ public class DayNightCycle : MonoBehaviour
         FinishNightAndStartMorning("You slept until morning. Treasures reset.");
     }
 
+    public void ApplySavedState(int savedDayNumber, bool savedIsNight, float savedPhase01)
+    {
+        bool dayChanged = savedDayNumber > dayNumber;
+        dayNumber = Mathf.Max(1, savedDayNumber);
+        isNight = savedIsNight;
+        phaseTimer = Mathf.Clamp01(savedPhase01) * Mathf.Max(0.01f, isNight ? nightDurationSeconds : dayDurationSeconds);
+
+        if (dayChanged)
+        {
+            ResetSearchDay();
+        }
+
+        statusMessage = "";
+        statusMessageTimer = 0f;
+        ApplyLighting();
+    }
+
     private void StartNight()
     {
         isNight = true;
@@ -81,6 +98,7 @@ public class DayNightCycle : MonoBehaviour
         phaseTimer = 0f;
         dayNumber++;
         ResetSearchDay();
+        BroadcastDayStateIfHost();
         ShowStatus(message);
     }
 
@@ -90,7 +108,7 @@ public class DayNightCycle : MonoBehaviour
 
         if (treasureSpawner != null)
         {
-            treasureSpawner.ClearSpawnedTreasures();
+            treasureSpawner.RegenerateTreasures(dayNumber);
         }
 
         GroundScanner[] scanners = FindObjectsByType<GroundScanner>();
@@ -103,13 +121,26 @@ public class DayNightCycle : MonoBehaviour
             }
         }
 
-        SearchArea[] searchAreas = FindObjectsByType<SearchArea>();
+        DetectorBattery[] batteries = FindObjectsByType<DetectorBattery>();
 
-        foreach (SearchArea searchArea in searchAreas)
+        foreach (DetectorBattery battery in batteries)
         {
-            if (searchArea != null)
+            if (battery != null)
             {
-                searchArea.ResetForNewDay();
+                battery.charge = battery.maxCharge;
+            }
+        }
+
+        if (treasureSpawner == null)
+        {
+            SearchArea[] searchAreas = FindObjectsByType<SearchArea>();
+
+            foreach (SearchArea searchArea in searchAreas)
+            {
+                if (searchArea != null)
+                {
+                    searchArea.ResetForNewDay();
+                }
             }
         }
 
@@ -131,6 +162,22 @@ public class DayNightCycle : MonoBehaviour
             {
                 Destroy(target.gameObject);
             }
+        }
+    }
+
+    private bool IsRemoteClientClock()
+    {
+        LocalCoopManager coop = LocalCoopManager.Instance;
+        return coop != null && coop.Role == LocalCoopManager.CoopRole.Client;
+    }
+
+    private void BroadcastDayStateIfHost()
+    {
+        LocalCoopManager coop = LocalCoopManager.Instance;
+
+        if (coop != null && coop.Role == LocalCoopManager.CoopRole.Host)
+        {
+            coop.ReportTeamStateChanged();
         }
     }
 
@@ -213,6 +260,11 @@ public class DayNightCycle : MonoBehaviour
 
     private void OnGUI()
     {
+        if (GameUIState.AnyMenuOpen)
+        {
+            return;
+        }
+
         string label = "Day " + dayNumber + " | " + (isNight ? "Night" : "Day") + " " + ClockText;
         GameGui.DrawToast(new Rect(Screen.width * 0.5f - 160f, 16f, 320f, 38f), label);
 

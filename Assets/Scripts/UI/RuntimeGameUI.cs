@@ -29,6 +29,7 @@ public class RuntimeGameUI : MonoBehaviour
     private TreasureMap treasureMap;
     private TutorialQuestSystem questSystem;
     private DiggingController diggingController;
+    private InteractionTargetHighlight interactionHighlight;
 
     private Text signalText;
     private Image signalFill;
@@ -41,6 +42,7 @@ public class RuntimeGameUI : MonoBehaviour
     private Image questFill;
     private Text hintText;
     private RectTransform worldPromptPanel;
+    private Image worldPromptIcon;
     private Text worldPromptKeyText;
     private Text worldPromptActionText;
     private CanvasGroup worldPromptCanvasGroup;
@@ -50,11 +52,13 @@ public class RuntimeGameUI : MonoBehaviour
     private Text foundToastTitleText;
     private Text foundToastText;
     private Text foundToastValueText;
+    private Image foundToastProgressFill;
     private readonly List<RectTransform> foundToastSparkles = new List<RectTransform>();
     private string currentFoundToastMessage = "";
     private int currentFoundToastValue = -1;
     private bool foundToastShouldShow;
     private bool foundToastIsReward;
+    private bool foundToastIsDigProgress;
     private RewardTier foundToastTier = RewardTier.Info;
     private Color foundToastAccentColor = Color.white;
     private float foundToastAnimationTimer;
@@ -71,6 +75,8 @@ public class RuntimeGameUI : MonoBehaviour
     private RectTransform shopPanel;
     private RectTransform shopContent;
     private RectTransform shopDropZone;
+    private RectTransform sellTabButton;
+    private RectTransform upgradeTabButton;
     private Text shopTitleText;
     private Text shopDropText;
     private Image shopDropImage;
@@ -95,6 +101,7 @@ public class RuntimeGameUI : MonoBehaviour
         IsActive = true;
         FindReferences();
         BuildCanvas();
+        interactionHighlight = gameObject.AddComponent<InteractionTargetHighlight>();
     }
 
     private void OnDestroy()
@@ -120,17 +127,17 @@ public class RuntimeGameUI : MonoBehaviour
     {
         if (metalDetector == null)
         {
-            metalDetector = FindAnyObjectByType<MetalDetector>();
+            metalDetector = PlayerRigReferences.FindLocalMetalDetector();
         }
 
         if (detectorBattery == null)
         {
-            detectorBattery = FindAnyObjectByType<DetectorBattery>();
+            detectorBattery = PlayerRigReferences.FindLocalDetectorBattery();
         }
 
         if (inventory == null)
         {
-            inventory = FindAnyObjectByType<PlayerInventory>();
+            inventory = PlayerRigReferences.FindLocalInventory();
         }
 
         if (diggingController == null)
@@ -138,9 +145,12 @@ public class RuntimeGameUI : MonoBehaviour
             diggingController = FindAnyObjectByType<DiggingController>();
         }
 
-        if (shop == null)
+        UpgradeShop bestShop = FindBestShop();
+
+        if (bestShop != null && bestShop != shop && (shop == null || !shop.IsMenuOpen))
         {
-            shop = FindBestShop();
+            shop = bestShop;
+            shopDirty = true;
         }
 
         if (treasureMap == null)
@@ -157,6 +167,39 @@ public class RuntimeGameUI : MonoBehaviour
     private UpgradeShop FindBestShop()
     {
         UpgradeShop[] shops = FindObjectsByType<UpgradeShop>();
+        UpgradeShop nearestShop = null;
+        float nearestDistance = float.MaxValue;
+
+        foreach (UpgradeShop candidate in shops)
+        {
+            if (candidate == null || candidate.shopNpc == null)
+            {
+                continue;
+            }
+
+            if (candidate.IsMenuOpen)
+            {
+                return candidate;
+            }
+
+            if (!candidate.IsPlayerNearShop())
+            {
+                continue;
+            }
+
+            float distance = Vector3.Distance(candidate.transform.position, candidate.shopNpc.position);
+
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearestShop = candidate;
+            }
+        }
+
+        if (nearestShop != null)
+        {
+            return nearestShop;
+        }
 
         foreach (UpgradeShop candidate in shops)
         {
@@ -189,7 +232,8 @@ public class RuntimeGameUI : MonoBehaviour
     private void BuildHud()
     {
         RectTransform detectorPanel = CreatePanel("Detector Panel", new Vector2(20f, -20f), new Vector2(340f, 150f), new Vector2(0f, 1f), canvas.transform);
-        CreateText("Detector", detectorPanel, new Vector2(16f, -12f), new Vector2(300f, 24f), 22, FontStyle.Bold, TextAnchor.MiddleLeft);
+        CreateIconBadge(detectorPanel, new Vector2(14f, -12f), new Vector2(42f, 34f), "detector", new Color(0.18f, 0.72f, 1f, 1f));
+        CreateText("Detector", detectorPanel, new Vector2(66f, -12f), new Vector2(250f, 24f), 22, FontStyle.Bold, TextAnchor.MiddleLeft);
         signalText = CreateText("Signal 0%", detectorPanel, new Vector2(16f, -48f), new Vector2(300f, 22f), 16, FontStyle.Normal, TextAnchor.MiddleLeft);
         signalFill = CreateBar(detectorPanel, new Vector2(16f, -78f), new Vector2(300f, 18f), new Color(1f, 0.76f, 0.2f, 1f));
         batteryText = CreateText("Battery 100%", detectorPanel, new Vector2(16f, -104f), new Vector2(300f, 22f), 14, FontStyle.Normal, TextAnchor.MiddleLeft);
@@ -201,9 +245,10 @@ public class RuntimeGameUI : MonoBehaviour
         cargoFill = CreateBar(statusPanel, new Vector2(14f, -72f), new Vector2(238f, 14f), new Color(1f, 0.76f, 0.2f, 1f));
 
         RectTransform questPanel = CreatePanel("Quest Panel", new Vector2(20f, -190f), new Vector2(380f, 92f), new Vector2(0f, 1f), canvas.transform);
-        CreateText("Tutorial", questPanel, new Vector2(14f, -10f), new Vector2(340f, 22f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
-        questText = CreateText("", questPanel, new Vector2(14f, -38f), new Vector2(340f, 20f), 14, FontStyle.Normal, TextAnchor.MiddleLeft);
-        questFill = CreateBar(questPanel, new Vector2(14f, -66f), new Vector2(340f, 12f), new Color(0.18f, 0.72f, 1f, 1f));
+        CreateIconBadge(questPanel, new Vector2(14f, -12f), new Vector2(42f, 36f), "quest", new Color(0.35f, 0.92f, 0.62f, 1f));
+        CreateText("Tutorial", questPanel, new Vector2(66f, -10f), new Vector2(292f, 22f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
+        questText = CreateText("", questPanel, new Vector2(66f, -38f), new Vector2(292f, 20f), 14, FontStyle.Normal, TextAnchor.MiddleLeft);
+        questFill = CreateBar(questPanel, new Vector2(66f, -66f), new Vector2(292f, 12f), new Color(0.18f, 0.72f, 1f, 1f));
 
         hintText = CreateText("Hold LMB scan | E dig/talk | TAB backpack | M map", canvas.transform as RectTransform, new Vector2(0f, 34f), new Vector2(620f, 38f), 18, FontStyle.Bold, TextAnchor.MiddleCenter);
         hintText.rectTransform.anchorMin = new Vector2(0.5f, 0f);
@@ -219,10 +264,11 @@ public class RuntimeGameUI : MonoBehaviour
         foundToastTitleText = CreateText("", foundToastPanel, new Vector2(150f, -22f), new Vector2(340f, 30f), 24, FontStyle.Bold, TextAnchor.MiddleLeft);
         foundToastText = CreateText("", foundToastPanel, new Vector2(150f, -58f), new Vector2(340f, 34f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
         foundToastValueText = CreateText("", foundToastPanel, new Vector2(150f, -96f), new Vector2(340f, 28f), 16, FontStyle.Normal, TextAnchor.MiddleLeft);
+        foundToastProgressFill = CreateBar(foundToastPanel, new Vector2(72f, -62f), new Vector2(260f, 10f), new Color(0.25f, 0.88f, 1f, 1f));
         BuildFoundToastSparkles();
         foundToastPanel.gameObject.SetActive(false);
 
-        worldPromptPanel = CreatePanel("World Interaction Prompt", Vector2.zero, new Vector2(220f, 54f), new Vector2(0.5f, 0.5f), canvas.transform);
+        worldPromptPanel = CreatePanel("World Interaction Prompt", Vector2.zero, new Vector2(270f, 54f), new Vector2(0.5f, 0.5f), canvas.transform);
         worldPromptPanel.pivot = new Vector2(0.5f, 0.5f);
         worldPromptCanvasGroup = worldPromptPanel.gameObject.AddComponent<CanvasGroup>();
         worldPromptCanvasGroup.alpha = 0f;
@@ -232,7 +278,8 @@ public class RuntimeGameUI : MonoBehaviour
         keyBox.GetComponent<Image>().color = new Color(1f, 0.76f, 0.2f, 0.95f);
         worldPromptKeyText = CreateText("E", keyBox, Vector2.zero, new Vector2(44f, 38f), 24, FontStyle.Bold, TextAnchor.MiddleCenter);
         worldPromptKeyText.color = new Color(0.06f, 0.045f, 0.02f, 1f);
-        worldPromptActionText = CreateText("Use", worldPromptPanel, new Vector2(64f, -11f), new Vector2(142f, 32f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
+        worldPromptIcon = CreateSpriteIcon(worldPromptPanel, new Vector2(64f, -12f), new Vector2(30f, 30f), GetIconSprite("quest"), true);
+        worldPromptActionText = CreateText("Use", worldPromptPanel, new Vector2(104f, -11f), new Vector2(146f, 32f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
         worldPromptPanel.gameObject.SetActive(false);
     }
 
@@ -253,8 +300,8 @@ public class RuntimeGameUI : MonoBehaviour
 
         RectTransform tabsPanel = CreatePanel("Trader Tabs", new Vector2(24f, -70f), new Vector2(170f, 374f), new Vector2(0f, 1f), shopPanel);
         tabsPanel.GetComponent<Image>().color = new Color(0.04f, 0.045f, 0.04f, 0.84f);
-        CreateShopTabButton(tabsPanel, "sell", "Sell Items", new Vector2(12f, -14f), ShopTab.Sell, new Color(0.35f, 0.92f, 0.62f, 1f));
-        CreateShopTabButton(tabsPanel, "upgrade", "Upgrades", new Vector2(12f, -76f), ShopTab.Upgrades, new Color(0.18f, 0.72f, 1f, 1f));
+        sellTabButton = CreateShopTabButton(tabsPanel, "sell", "Sell Items", new Vector2(12f, -14f), ShopTab.Sell, new Color(0.35f, 0.92f, 0.62f, 1f));
+        upgradeTabButton = CreateShopTabButton(tabsPanel, "upgrade", "Upgrades", new Vector2(12f, -76f), ShopTab.Upgrades, new Color(0.18f, 0.72f, 1f, 1f));
 
         shopContent = CreatePanel("Trader Content", new Vector2(212f, -70f), new Vector2(524f, 374f), new Vector2(0f, 1f), shopPanel);
         shopContent.GetComponent<Image>().color = new Color(0.03f, 0.035f, 0.03f, 0.78f);
@@ -266,7 +313,8 @@ public class RuntimeGameUI : MonoBehaviour
     private void BuildMap()
     {
         mapPanel = CreatePanel("Map Panel", new Vector2(20f, -300f), new Vector2(420f, 420f), new Vector2(0f, 1f), canvas.transform);
-        mapTitleText = CreateText("Search Map", mapPanel, new Vector2(16f, -12f), new Vector2(360f, 24f), 20, FontStyle.Bold, TextAnchor.MiddleLeft);
+        CreateIconBadge(mapPanel, new Vector2(14f, -10f), new Vector2(38f, 32f), "map", new Color(0.18f, 0.72f, 1f, 1f));
+        mapTitleText = CreateText("Search Map", mapPanel, new Vector2(62f, -12f), new Vector2(320f, 24f), 20, FontStyle.Bold, TextAnchor.MiddleLeft);
         mapContent = CreatePanel("Map Content", new Vector2(18f, -50f), new Vector2(384f, 330f), new Vector2(0f, 1f), mapPanel);
         mapPanel.gameObject.SetActive(false);
     }
@@ -286,7 +334,7 @@ public class RuntimeGameUI : MonoBehaviour
         {
             string signalState = metalDetector.RevealSignalActive
                 ? "target marked"
-                : metalDetector.CurrentSignalCellDistance <= 0 ? "scan now" : metalDetector.CurrentSignalCellDistance + " cells";
+                : metalDetector.CurrentSignalCellDistance <= 0 ? "scan now" : metalDetector.CurrentSignalDistanceMeters.ToString("0.0") + "m";
             signalText.text = "Signal " + Mathf.RoundToInt(signal * 100f) + "% | " + signalState;
         }
         else
@@ -343,20 +391,29 @@ public class RuntimeGameUI : MonoBehaviour
         }
 
         foundToastIsReward = diggingController.LastFoundWasTreasure;
+        foundToastIsDigProgress = !foundToastIsReward && diggingController.LastDigRequiredHits > 0;
         foundToastTier = foundToastIsReward ? GetRewardTier(diggingController.LastFoundValue) : RewardTier.Info;
-        foundToastAccentColor = GetRewardAccentColor(foundToastTier);
+        foundToastAccentColor = foundToastIsDigProgress ? new Color(0.25f, 0.88f, 1f, 1f) : GetRewardAccentColor(foundToastTier);
         foundToastPanel.GetComponent<Image>().color = GetRewardPanelColor(foundToastTier);
         ApplyFoundToastLayout(foundToastTier);
-        foundToastTitleText.text = GetRewardTitle(foundToastTier);
+        foundToastTitleText.text = GetToastTitle();
         foundToastTitleText.color = foundToastAccentColor;
-        foundToastText.text = foundToastIsReward ? GetRewardSubtitle(foundToastTier) : diggingController.LastFoundMessage;
+        foundToastText.text = GetToastBody();
         foundToastValueText.text = foundToastIsReward
             ? diggingController.LastFoundItemName + "  $" + diggingController.LastFoundValue
             : "";
         foundToastValueText.gameObject.SetActive(foundToastIsReward);
         foundToastValueText.color = foundToastIsReward ? Color.Lerp(foundToastAccentColor, Color.white, 0.35f) : Color.white;
-        foundToastIcon.sprite = diggingController.LastFoundIcon != null ? diggingController.LastFoundIcon : GetIconSprite("treasure");
+        foundToastIcon.gameObject.SetActive(foundToastIsReward || foundToastIsDigProgress);
+        foundToastIcon.sprite = foundToastIsReward && diggingController.LastFoundIcon != null ? diggingController.LastFoundIcon : GetIconSprite("treasure");
         foundToastIcon.preserveAspect = true;
+
+        if (foundToastProgressFill != null)
+        {
+            foundToastProgressFill.transform.parent.gameObject.SetActive(foundToastIsDigProgress);
+            foundToastProgressFill.fillAmount = foundToastIsDigProgress ? diggingController.LastDigProgress01 : 0f;
+            foundToastProgressFill.color = foundToastAccentColor;
+        }
     }
 
     private void AnimateFoundToast()
@@ -385,7 +442,7 @@ public class RuntimeGameUI : MonoBehaviour
         float rewardPop = foundToastIsReward ? Mathf.Sin(Mathf.Clamp01(foundToastAnimationTimer / 0.34f) * Mathf.PI) * popStrength : 0f;
         float idlePulse = foundToastTier == RewardTier.Jackpot ? Mathf.Sin(foundToastAnimationTimer * 8f) * 0.025f : 0f;
         float startScale = foundToastTier == RewardTier.Trash ? 0.94f : foundToastTier == RewardTier.Jackpot ? 0.72f : 0.84f;
-        float targetScale = foundToastIsReward ? Mathf.Lerp(startScale, 1f, easedAppear) + rewardPop + idlePulse : Mathf.Lerp(0.96f, 1f, easedAppear);
+        float targetScale = foundToastIsReward ? Mathf.Lerp(startScale, 1f, easedAppear) + rewardPop + idlePulse : Mathf.Lerp(0.92f, 1f, easedAppear);
         foundToastPanel.localScale = Vector3.one * targetScale;
 
         for (int i = 0; i < foundToastSparkles.Count; i++)
@@ -423,6 +480,13 @@ public class RuntimeGameUI : MonoBehaviour
             return;
         }
 
+        if (GameUIState.IsQuestMenuOpen)
+        {
+            hintText.text = "ESC - Close jobs";
+            HideWorldPrompt();
+            return;
+        }
+
         if (GameUIState.IsInventoryOpen)
         {
             hintText.text = "TAB / ESC - Close backpack";
@@ -437,12 +501,30 @@ public class RuntimeGameUI : MonoBehaviour
             return;
         }
 
+        NpcQuestGiver questGiver = NpcQuestGiver.FindClosestQuestGiverInRange();
+
+        if (questGiver != null)
+        {
+            hintText.text = "E - Talk / Jobs";
+            ShowWorldPrompt("Jobs", questGiver.PromptPosition, new Color(0.35f, 0.92f, 0.62f, 0.95f), "quest", questGiver.transform);
+            return;
+        }
+
         PlayerHome home = PlayerHome.FindClosestHomeInRange();
 
         if (home != null)
         {
             hintText.text = "E - Use home";
-            ShowWorldPrompt("Use Home", home.PromptPosition, new Color(0.35f, 0.92f, 0.62f, 0.95f));
+            ShowWorldPrompt("Use Home", home.PromptPosition, new Color(0.35f, 0.92f, 0.62f, 0.95f), "bag", home.transform);
+            return;
+        }
+
+        SearchAreaPurchasePoint purchasePoint = SearchAreaPurchasePoint.FindClosestInteractableInRange();
+
+        if (purchasePoint != null)
+        {
+            hintText.text = "E - " + purchasePoint.PromptActionText;
+            ShowWorldPrompt(purchasePoint.PromptActionText, purchasePoint.PromptPosition, new Color(0.35f, 0.92f, 0.62f, 0.95f), "map", purchasePoint.transform);
             return;
         }
 
@@ -453,10 +535,24 @@ public class RuntimeGameUI : MonoBehaviour
             return;
         }
 
-        if (shop != null && shop.IsPlayerNearShop())
+        UpgradeShop promptShop = FindBestShop();
+
+        if (promptShop != null && promptShop.IsPlayerNearShop())
         {
-            hintText.text = "E - Talk / Use";
-            ShowWorldPrompt("Talk / Use", shop.shopNpc.position + Vector3.up * 1.35f, new Color(1f, 0.76f, 0.2f, 0.95f));
+            shop = promptShop;
+            string actionText = promptShop.CanSellHere && !promptShop.CanUpgradeHere ? "Sell" : promptShop.CanUpgradeHere && !promptShop.CanSellHere ? "Upgrade" : "Trade";
+            string icon = promptShop.CanSellHere && !promptShop.CanUpgradeHere ? "sell" : "upgrade";
+            hintText.text = "E - " + actionText;
+            ShowWorldPrompt(actionText, promptShop.shopNpc.position + Vector3.up * 1.35f, new Color(1f, 0.76f, 0.2f, 0.95f), icon, promptShop.shopNpc);
+            return;
+        }
+
+        DetectableTreasure searchableChest = diggingController != null ? diggingController.FindClosestSearchableChestInRange() : null;
+
+        if (searchableChest != null)
+        {
+            hintText.text = "E - Search";
+            ShowWorldPrompt("Search", diggingController.GetChestPromptPosition(searchableChest), new Color(1f, 0.76f, 0.2f, 0.95f), "treasure", diggingController.GetChestHighlightTarget(searchableChest));
             return;
         }
 
@@ -468,7 +564,8 @@ public class RuntimeGameUI : MonoBehaviour
             Vector3 promptPosition = digTarget.revealMarker != null
                 ? digTarget.revealMarker.transform.position + Vector3.up * 0.75f
                 : digTarget.transform.position + Vector3.up * 0.75f;
-            ShowWorldPrompt("Dig", promptPosition, new Color(0.25f, 0.88f, 1f, 0.95f));
+            Transform highlightTarget = digTarget.revealMarker != null ? digTarget.revealMarker.transform : digTarget.transform;
+            ShowWorldPrompt("Dig", promptPosition, new Color(0.25f, 0.88f, 1f, 0.95f), "treasure", highlightTarget);
             return;
         }
 
@@ -476,7 +573,7 @@ public class RuntimeGameUI : MonoBehaviour
         HideWorldPrompt();
     }
 
-    private void ShowWorldPrompt(string actionText, Vector3 worldPosition, Color keyColor)
+    private void ShowWorldPrompt(string actionText, Vector3 worldPosition, Color keyColor, string iconName, Transform highlightTarget = null)
     {
         Camera camera = Camera.main;
 
@@ -503,6 +600,7 @@ public class RuntimeGameUI : MonoBehaviour
 
         worldPromptTargetPosition = localPosition;
         worldPromptVisible = true;
+        SetInteractionHighlight(highlightTarget);
 
         if (!worldPromptHasPosition)
         {
@@ -512,12 +610,27 @@ public class RuntimeGameUI : MonoBehaviour
 
         worldPromptActionText.text = actionText;
         worldPromptKeyText.transform.parent.GetComponent<Image>().color = keyColor;
+
+        if (worldPromptIcon != null)
+        {
+            worldPromptIcon.sprite = GetIconSprite(iconName);
+        }
+
         worldPromptPanel.gameObject.SetActive(true);
     }
 
     private void HideWorldPrompt()
     {
         worldPromptVisible = false;
+        SetInteractionHighlight(null);
+    }
+
+    private void SetInteractionHighlight(Transform target)
+    {
+        if (interactionHighlight != null)
+        {
+            interactionHighlight.SetTarget(target);
+        }
     }
 
     private void AnimateWorldPrompt()
@@ -548,20 +661,20 @@ public class RuntimeGameUI : MonoBehaviour
 
     private void RefreshInventory()
     {
-        bool isOpen = inventory != null && inventory.isOpen;
-        inventoryPanel.gameObject.SetActive(isOpen);
-
-        if (!isOpen)
-        {
-            return;
-        }
-
-        inventoryTitleText.text = "Backpack " + inventory.gridSize + "x" + inventory.gridSize;
-        RebuildInventoryGrid();
+        // The backpack is drawn by PlayerInventory.OnGUI so it can use the illustrated board assets.
+        inventoryPanel.gameObject.SetActive(false);
     }
 
     private void RefreshShop()
     {
+        UpgradeShop openShop = FindBestShop();
+
+        if (openShop != null && openShop.IsMenuOpen && openShop != shop)
+        {
+            shop = openShop;
+            shopDirty = true;
+        }
+
         bool isOpen = shop != null && shop.IsMenuOpen;
         shopPanel.gameObject.SetActive(isOpen);
 
@@ -577,6 +690,9 @@ public class RuntimeGameUI : MonoBehaviour
             lastShopMoney = inventory.money;
         }
 
+        EnsureAllowedShopTab();
+        RefreshShopTabs();
+
         if (shopDirty)
         {
             RebuildShopContent();
@@ -590,7 +706,7 @@ public class RuntimeGameUI : MonoBehaviour
             : "";
     }
 
-    private void CreateShopTabButton(RectTransform parent, string iconText, string label, Vector2 anchoredPosition, ShopTab tab, Color iconColor)
+    private RectTransform CreateShopTabButton(RectTransform parent, string iconText, string label, Vector2 anchoredPosition, ShopTab tab, Color iconColor)
     {
         RectTransform buttonRect = CreatePanel(label + " Tab", anchoredPosition, new Vector2(146f, 48f), new Vector2(0f, 1f), parent);
         buttonRect.GetComponent<Image>().color = new Color(0.13f, 0.11f, 0.08f, 0.94f);
@@ -606,6 +722,42 @@ public class RuntimeGameUI : MonoBehaviour
 
         CreateIconBadge(buttonRect, new Vector2(8f, -7f), new Vector2(36f, 34f), iconText, iconColor);
         CreateText(label, buttonRect, new Vector2(52f, -10f), new Vector2(86f, 28f), 15, FontStyle.Bold, TextAnchor.MiddleLeft);
+        return buttonRect;
+    }
+
+    private void EnsureAllowedShopTab()
+    {
+        if (shop == null)
+        {
+            return;
+        }
+
+        if (activeShopTab == ShopTab.Sell && !shop.CanSellHere && shop.CanUpgradeHere)
+        {
+            activeShopTab = ShopTab.Upgrades;
+            shopDirty = true;
+        }
+        else if (activeShopTab == ShopTab.Upgrades && !shop.CanUpgradeHere && shop.CanSellHere)
+        {
+            activeShopTab = ShopTab.Sell;
+            shopDirty = true;
+        }
+    }
+
+    private void RefreshShopTabs()
+    {
+        if (sellTabButton != null)
+        {
+            sellTabButton.gameObject.SetActive(shop == null || shop.CanSellHere);
+        }
+
+        if (upgradeTabButton != null)
+        {
+            upgradeTabButton.gameObject.SetActive(shop == null || shop.CanUpgradeHere);
+            upgradeTabButton.anchoredPosition = shop != null && !shop.CanSellHere
+                ? new Vector2(12f, -14f)
+                : new Vector2(12f, -76f);
+        }
     }
 
     private void RebuildShopContent()
@@ -697,7 +849,7 @@ public class RuntimeGameUI : MonoBehaviour
         string detectorDescription = metalDetector != null && metalDetector.CanUpgradeDetector
             ? "Next: " + metalDetector.GetDetectorName(metalDetector.DetectorTier + 1) + " scans " + metalDetector.GetScanCellsForTier(metalDetector.DetectorTier + 1) + "x" + metalDetector.GetScanCellsForTier(metalDetector.DetectorTier + 1) + " cells."
             : "Your detector scans the maximum 6x6 grid.";
-        AddShopObject(CreateUpgradeCard("range", detectorTitle, detectorDescription, detectorPrice, new Vector2(18f, -50f), () =>
+        AddShopObject(CreateUpgradeCard("detector", detectorTitle, detectorDescription, detectorPrice, new Vector2(18f, -50f), () =>
         {
             shop?.TryBuyDetectorUpgrade();
             shopDirty = true;
@@ -710,7 +862,7 @@ public class RuntimeGameUI : MonoBehaviour
         }).gameObject);
 
         string shovelCost = shop != null && shop.shovelUpgraded ? "Equipped" : "$" + (shop != null ? shop.shovelUpgradeCost : 0);
-        AddShopObject(CreateUpgradeCard("upgrade", "Clean Shovel", "Replaces the rusty shovel animation with the clean silver shovel.", shovelCost, new Vector2(18f, -206f), () =>
+        AddShopObject(CreateUpgradeCard("shovel", "Clean Shovel", "Replaces the rusty shovel animation with the clean silver shovel.", shovelCost, new Vector2(18f, -206f), () =>
         {
             shop?.TryBuyShovelUpgrade();
             shopDirty = true;
@@ -1075,6 +1227,65 @@ public class RuntimeGameUI : MonoBehaviour
         }
     }
 
+    private string GetToastTitle()
+    {
+        if (foundToastIsReward)
+        {
+            return GetRewardTitle(foundToastTier);
+        }
+
+        if (foundToastIsDigProgress)
+        {
+            return "Digging";
+        }
+
+        string message = currentFoundToastMessage ?? "";
+
+        if (message.Contains("Too dark"))
+        {
+            return "Too Dark";
+        }
+
+        if (message.Contains("Backpack is full"))
+        {
+            return "Backpack Full";
+        }
+
+        if (message.Contains("No marked target"))
+        {
+            return "No Target";
+        }
+
+        return "Notice";
+    }
+
+    private string GetToastBody()
+    {
+        if (foundToastIsReward)
+        {
+            return GetRewardSubtitle(foundToastTier);
+        }
+
+        if (foundToastIsDigProgress && diggingController != null)
+        {
+            return "Unearthing target  " + diggingController.LastDigCurrentHits + " / " + diggingController.LastDigRequiredHits;
+        }
+
+        string message = currentFoundToastMessage ?? "";
+
+        if (message.Contains("No marked target"))
+        {
+            return "Scan with the detector first.";
+        }
+
+        if (message.Contains("Too dark"))
+        {
+            return "Sleep at home until morning.";
+        }
+
+        return message;
+    }
+
     private string GetRewardSubtitle(RewardTier tier)
     {
         switch (tier)
@@ -1180,6 +1391,7 @@ public class RuntimeGameUI : MonoBehaviour
     private void ApplyFoundToastLayout(RewardTier tier)
     {
         Vector2 panelSize = new Vector2(520f, 150f);
+        Vector2 panelPosition = new Vector2(0f, -185f);
         Vector2 iconPosition = new Vector2(24f, -24f);
         Vector2 iconSize = new Vector2(104f, 104f);
         Vector2 textStart = new Vector2(150f, -22f);
@@ -1198,6 +1410,18 @@ public class RuntimeGameUI : MonoBehaviour
             titleSize = 21;
             subtitleSize = 15;
             valueSize = 14;
+        }
+        else if (!foundToastIsReward)
+        {
+            panelSize = foundToastIsDigProgress ? new Vector2(420f, 92f) : new Vector2(390f, 78f);
+            panelPosition = new Vector2(0f, -405f);
+            iconPosition = foundToastIsDigProgress ? new Vector2(18f, -18f) : new Vector2(0f, 0f);
+            iconSize = foundToastIsDigProgress ? new Vector2(50f, 50f) : Vector2.zero;
+            textStart = foundToastIsDigProgress ? new Vector2(86f, -14f) : new Vector2(22f, -13f);
+            textWidth = foundToastIsDigProgress ? new Vector2(304f, 24f) : new Vector2(346f, 24f);
+            titleSize = 17;
+            subtitleSize = 14;
+            valueSize = 12;
         }
         else if (tier == RewardTier.Valuable)
         {
@@ -1222,6 +1446,7 @@ public class RuntimeGameUI : MonoBehaviour
             valueSize = 22;
         }
 
+        foundToastPanel.anchoredPosition = panelPosition;
         foundToastPanel.sizeDelta = panelSize;
         foundToastIcon.rectTransform.anchoredPosition = iconPosition;
         foundToastIcon.rectTransform.sizeDelta = iconSize;
@@ -1234,6 +1459,17 @@ public class RuntimeGameUI : MonoBehaviour
         foundToastTitleText.fontSize = titleSize;
         foundToastText.fontSize = subtitleSize;
         foundToastValueText.fontSize = valueSize;
+
+        if (foundToastProgressFill != null)
+        {
+            RectTransform progressBackground = foundToastProgressFill.transform.parent as RectTransform;
+
+            if (progressBackground != null)
+            {
+                progressBackground.anchoredPosition = new Vector2(textStart.x, -62f);
+                progressBackground.sizeDelta = new Vector2(textWidth.x, 10f);
+            }
+        }
     }
 
     private Vector2 GetFoundToastIconCenter()
@@ -1273,8 +1509,24 @@ public class RuntimeGameUI : MonoBehaviour
 
     private Sprite GetIconSprite(string iconName)
     {
+        if (string.IsNullOrEmpty(iconName))
+        {
+            iconName = "treasure";
+        }
+
         if (iconSprites.TryGetValue(iconName, out Sprite sprite))
         {
+            return sprite;
+        }
+
+        Texture2D resourceTexture = Resources.Load<Texture2D>("UI/Icons/" + iconName);
+
+        if (resourceTexture != null)
+        {
+            resourceTexture.filterMode = FilterMode.Bilinear;
+            resourceTexture.wrapMode = TextureWrapMode.Clamp;
+            sprite = Sprite.Create(resourceTexture, new Rect(0f, 0f, resourceTexture.width, resourceTexture.height), new Vector2(0.5f, 0.5f), 100f);
+            iconSprites.Add(iconName, sprite);
             return sprite;
         }
 
@@ -1343,6 +1595,38 @@ public class RuntimeGameUI : MonoBehaviour
             DrawRect(texture, 32, 12, 8, 26, ink);
             DrawLine(texture, 18, 13, 18, 38, clear, 2);
             DrawLine(texture, 30, 10, 30, 36, clear, 2);
+        }
+        else if (iconName == "quest")
+        {
+            DrawRect(texture, 13, 8, 21, 32, ink);
+            DrawRect(texture, 17, 30, 13, 3, clear);
+            DrawRect(texture, 17, 23, 12, 3, clear);
+            DrawRect(texture, 17, 16, 14, 3, clear);
+            DrawCircle(texture, 35, 34, 9, ink);
+            DrawRect(texture, 34, 31, 2, 8, clear);
+            DrawRect(texture, 34, 26, 2, 2, clear);
+        }
+        else if (iconName == "detector")
+        {
+            DrawCircleOutline(texture, 13, 15, 9, ink, 3);
+            DrawLine(texture, 20, 20, 34, 32, ink, 4);
+            DrawRect(texture, 31, 30, 12, 8, ink);
+            DrawRect(texture, 35, 33, 5, 2, clear);
+            DrawLine(texture, 40, 38, 45, 43, ink, 3);
+        }
+        else if (iconName == "shovel")
+        {
+            DrawLine(texture, 15, 11, 33, 31, ink, 4);
+            DrawCircleOutline(texture, 12, 10, 5, ink, 3);
+            DrawRect(texture, 31, 29, 9, 8, ink);
+            DrawLine(texture, 34, 28, 44, 18, ink, 5);
+        }
+        else if (iconName == "treasure")
+        {
+            DrawRect(texture, 9, 17, 30, 17, ink);
+            DrawRect(texture, 12, 29, 24, 8, ink);
+            DrawRect(texture, 22, 22, 5, 8, clear);
+            DrawRect(texture, 23, 23, 3, 5, ink);
         }
         else
         {

@@ -4,6 +4,11 @@ using UnityEngine.InputSystem;
 
 public class PlayerHome : MonoBehaviour
 {
+    private const string WatchFragmentName = "Watch Fragment";
+    private const string WorkingWatchName = "Working Pocket Watch";
+    private const int WorkingWatchValue = 95;
+    private const string CraftingBoardResourcePath = "UI/CraftingBoard";
+
     public Transform interactionPoint;
     public Transform promptAnchor;
     public float interactionDistance = 4.5f;
@@ -12,9 +17,24 @@ public class PlayerHome : MonoBehaviour
     public DetectorBattery detectorBattery;
 
     private readonly List<PlayerInventory.InventorySlot> storedItems = new List<PlayerInventory.InventorySlot>();
+    private readonly PlayerInventory.InventorySlot[] craftingSlots = new PlayerInventory.InventorySlot[9];
     private bool isMenuOpen;
+    private bool isCraftingOpen;
     private string message = "";
     private float messageTimer;
+    private Texture2D craftingBoardTexture;
+    private CraftingDragSource craftingDragSource = CraftingDragSource.None;
+    private PlayerInventory.InventorySlot draggedCraftingItem;
+    private PlayerInventory.InventorySlot draggedBackpackItem;
+    private int draggedCraftingSlotIndex = -1;
+
+    private enum CraftingDragSource
+    {
+        None,
+        Backpack,
+        CraftingSlot,
+        Result
+    }
 
     public bool IsMenuOpen => isMenuOpen;
     public int StoredItemCount => storedItems.Count;
@@ -64,6 +84,12 @@ public class PlayerHome : MonoBehaviour
 
     public void SetMenuOpen(bool open)
     {
+        if (!open)
+        {
+            ReturnCraftingItemsToBackpack();
+            isCraftingOpen = false;
+        }
+
         isMenuOpen = open;
         GameUIState.SetHomeMenuOpen(isMenuOpen);
     }
@@ -86,6 +112,7 @@ public class PlayerHome : MonoBehaviour
 
         playerInventory.items.Clear();
         ShowMessage("Stored " + storedCount + " item(s), value $" + storedValue + ".");
+        LocalCoopManager.Instance?.ReportHomeStorageChanged(this);
     }
 
     public void TakeStoredItems()
@@ -126,31 +153,89 @@ public class PlayerHome : MonoBehaviour
         }
 
         ShowMessage("Took " + movedCount + " item(s), value $" + movedValue + ".");
+        LocalCoopManager.Instance?.ReportHomeStorageChanged(this);
     }
 
     public void Sleep()
     {
         ResolveReferences();
 
+        LocalCoopManager coop = LocalCoopManager.Instance;
+
+        if (DayNightCycle.Instance != null && !DayNightCycle.Instance.CanSleep)
+        {
+            ShowMessage("You can sleep after 20:00.");
+            return;
+        }
+
+        if (coop != null && coop.IsRunning)
+        {
+            if (coop.RequestTeamSleep(out string teamSleepMessage))
+            {
+                ShowMessage(teamSleepMessage);
+                return;
+            }
+        }
+
+        if (DayNightCycle.Instance != null)
+        {
+            DayNightCycle.Instance.SleepUntilMorning();
+            coop?.ReportTeamStateChanged();
+            ShowMessage("You slept until morning. Treasures reset.");
+            return;
+        }
+
         if (detectorBattery != null)
         {
             detectorBattery.charge = detectorBattery.maxCharge;
         }
 
-        if (DayNightCycle.Instance != null)
-        {
-            if (!DayNightCycle.Instance.CanSleep)
-            {
-                ShowMessage("You can sleep after 20:00.");
-                return;
-            }
+        ShowMessage("You slept. Detector battery refilled.");
+    }
 
-            DayNightCycle.Instance.SleepUntilMorning();
-            ShowMessage("You slept until morning. Treasures reset.");
+    public List<PlayerInventory.InventorySlot> ExportStoredItems()
+    {
+        List<PlayerInventory.InventorySlot> exportedItems = new List<PlayerInventory.InventorySlot>();
+
+        foreach (PlayerInventory.InventorySlot item in storedItems)
+        {
+            exportedItems.Add(CloneItem(item));
+        }
+
+        return exportedItems;
+    }
+
+    public void ImportStoredItems(IEnumerable<PlayerInventory.InventorySlot> importedItems)
+    {
+        storedItems.Clear();
+
+        if (importedItems == null)
+        {
             return;
         }
 
-        ShowMessage("You slept. Detector battery refilled.");
+        foreach (PlayerInventory.InventorySlot item in importedItems)
+        {
+            storedItems.Add(CloneItem(item));
+        }
+    }
+
+    public void OpenCrafting()
+    {
+        isCraftingOpen = true;
+        ShowMessage("");
+    }
+
+    public void CloseCrafting()
+    {
+        ClearCraftingDrag();
+        ReturnCraftingItemsToBackpack();
+        isCraftingOpen = false;
+    }
+
+    public void CraftSelectedRecipe()
+    {
+        TryClaimCraftingResult();
     }
 
     public static PlayerHome FindClosestHomeInRange()
@@ -203,6 +288,127 @@ public class PlayerHome : MonoBehaviour
         }
     }
 
+    private bool TryPlaceItemInCrafting(PlayerInventory.InventorySlot item)
+    {
+        if (playerInventory == null || item == null)
+        {
+            return false;
+        }
+
+        int emptySlot = GetFirstEmptyCraftingSlot();
+
+        if (emptySlot < 0)
+        {
+            ShowMessage("Crafting grid is full.");
+            return false;
+        }
+
+        if (!playerInventory.RemoveItem(item))
+        {
+            return false;
+        }
+
+        craftingSlots[emptySlot] = CloneItem(item);
+        ShowMessage("Placed " + item.itemName + ".");
+        return true;
+    }
+
+    private void ReturnCraftingSlotToBackpack(int slotIndex)
+    {
+        if (playerInventory == null || slotIndex < 0 || slotIndex >= craftingSlots.Length)
+        {
+            return;
+        }
+
+        PlayerInventory.InventorySlot item = craftingSlots[slotIndex];
+
+        if (item == null)
+        {
+            return;
+        }
+
+        if (!playerInventory.AddItem(item.itemName, item.value, item.width, item.height, item.icon))
+        {
+            ShowMessage("Backpack is full.");
+            return;
+        }
+
+        craftingSlots[slotIndex] = null;
+        ShowMessage("Returned " + item.itemName + ".");
+    }
+
+    private void ReturnCraftingItemsToBackpack()
+    {
+        if (playerInventory == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < craftingSlots.Length; i++)
+        {
+            PlayerInventory.InventorySlot item = craftingSlots[i];
+
+            if (item == null)
+            {
+                continue;
+            }
+
+            if (!playerInventory.AddItem(item.itemName, item.value, item.width, item.height, item.icon))
+            {
+                continue;
+            }
+
+            craftingSlots[i] = null;
+        }
+    }
+
+    private int GetFirstEmptyCraftingSlot()
+    {
+        for (int i = 0; i < craftingSlots.Length; i++)
+        {
+            if (craftingSlots[i] == null)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private bool TryGetWatchRecipeRow(out int rowStart)
+    {
+        for (int row = 0; row < 3; row++)
+        {
+            int start = row * 3;
+
+            if (IsWatchFragment(craftingSlots[start])
+                && IsWatchFragment(craftingSlots[start + 1])
+                && IsWatchFragment(craftingSlots[start + 2]))
+            {
+                rowStart = start;
+                return true;
+            }
+        }
+
+        rowStart = -1;
+        return false;
+    }
+
+    private bool IsWatchFragment(PlayerInventory.InventorySlot item)
+    {
+        return item != null && item.itemName == WatchFragmentName;
+    }
+
+    private Texture2D GetCraftingBoardTexture()
+    {
+        if (craftingBoardTexture == null)
+        {
+            craftingBoardTexture = Resources.Load<Texture2D>(CraftingBoardResourcePath);
+        }
+
+        return craftingBoardTexture;
+    }
+
     private int GetStoredValue()
     {
         int value = 0;
@@ -251,7 +457,13 @@ public class PlayerHome : MonoBehaviour
 
     private void DrawHomeMenu()
     {
-        Rect panel = new Rect(Screen.width * 0.5f - 220f, Screen.height * 0.5f - 140f, 440f, 280f);
+        if (isCraftingOpen)
+        {
+            DrawCraftingMenu();
+            return;
+        }
+
+        Rect panel = new Rect(Screen.width * 0.5f - 220f, Screen.height * 0.5f - 163f, 440f, 326f);
         GameGui.DrawPanel(panel, "Home");
 
         int backpackCount = playerInventory != null ? playerInventory.items.Count : 0;
@@ -269,12 +481,388 @@ public class PlayerHome : MonoBehaviour
             TakeStoredItems();
         }
 
-        if (GameGui.Button(new Rect(panel.x + 18f, panel.y + 204f, panel.width - 36f, 38f), "Sleep"))
+        LocalCoopManager coop = LocalCoopManager.Instance;
+        bool teamSleepActive = coop != null && coop.IsRunning;
+        string sleepButtonText = teamSleepActive && coop.IsLocalPlayerSleepReady ? "Waiting for team..." : "Sleep";
+
+        if (GameGui.Button(new Rect(panel.x + 18f, panel.y + 204f, panel.width - 36f, 38f), sleepButtonText))
         {
             Sleep();
         }
 
-        GUI.Label(new Rect(panel.x + 18f, panel.y + 248f, panel.width - 36f, 22f), messageTimer > 0f ? message : "ESC - Close", GameGui.HintStyle);
+        if (GameGui.Button(new Rect(panel.x + 18f, panel.y + 250f, panel.width - 36f, 38f), "Crafting"))
+        {
+            OpenCrafting();
+        }
+
+        string footerText = messageTimer > 0f ? message : "ESC - Close";
+
+        if (teamSleepActive && coop.HasTeamSleepVote && !string.IsNullOrEmpty(coop.TeamSleepStatusText))
+        {
+            footerText = coop.TeamSleepStatusText;
+        }
+
+        GUI.Label(new Rect(panel.x + 18f, panel.y + 294f, panel.width - 36f, 22f), footerText, GameGui.HintStyle);
+    }
+
+    private void DrawCraftingMenu()
+    {
+        float availableWidth = Mathf.Max(720f, Screen.width - 40f);
+        float gap = 18f;
+        float backpackWidth = Mathf.Clamp(Screen.width * 0.34f, 420f, 620f);
+        float boardWidth = Mathf.Clamp(availableWidth - backpackWidth - gap, 620f, 980f);
+
+        if (boardWidth + backpackWidth + gap > availableWidth)
+        {
+            backpackWidth = Mathf.Clamp(availableWidth * 0.34f, 340f, 520f);
+            boardWidth = Mathf.Max(520f, availableWidth - backpackWidth - gap);
+        }
+
+        float boardHeight = boardWidth / PlayerInventory.BoardAspect;
+        float backpackHeight = backpackWidth / PlayerInventory.BoardAspect;
+        float maxBoardHeight = Mathf.Max(420f, Screen.height - 70f);
+
+        if (boardHeight > maxBoardHeight)
+        {
+            boardHeight = maxBoardHeight;
+            boardWidth = boardHeight * PlayerInventory.BoardAspect;
+            backpackWidth = Mathf.Min(backpackWidth, Mathf.Max(320f, availableWidth - boardWidth - gap));
+            backpackHeight = backpackWidth / PlayerInventory.BoardAspect;
+        }
+
+        float totalWidth = boardWidth + backpackWidth + gap;
+        Rect boardRect = new Rect(Screen.width * 0.5f - totalWidth * 0.5f, Screen.height * 0.5f - boardHeight * 0.5f - 8f, boardWidth, boardHeight);
+        Texture2D boardTexture = GetCraftingBoardTexture();
+        Rect contentRect = boardRect;
+        Rect backpackRect = new Rect(contentRect.x + contentRect.width + gap, contentRect.y + contentRect.height * 0.5f - backpackHeight * 0.5f, backpackWidth, backpackHeight);
+
+        if (boardTexture != null)
+        {
+            contentRect = PlayerInventory.GetFittedTextureRect(boardRect, boardTexture);
+            GUI.DrawTexture(contentRect, boardTexture, ScaleMode.StretchToFill, true);
+            backpackRect = new Rect(contentRect.x + contentRect.width + gap, contentRect.y + contentRect.height * 0.5f - backpackHeight * 0.5f, backpackWidth, backpackHeight);
+        }
+        else
+        {
+            GameGui.DrawPanel(boardRect, "Crafting");
+        }
+
+        DrawCraftingGrid(contentRect);
+        DrawCraftingResult(contentRect);
+        DrawCraftingBackpack(backpackRect);
+
+        GUI.Label(new Rect(contentRect.x + 42f, contentRect.y + contentRect.height - 48f, contentRect.width - 250f, 28f), messageTimer > 0f ? message : "ESC - Close", GameGui.HintStyle);
+        HandleCraftingDragRelease(contentRect, backpackRect);
+        DrawCraftingDragGhost();
+    }
+
+    private void DrawCraftingGrid(Rect boardRect)
+    {
+        for (int y = 0; y < 3; y++)
+        {
+            for (int x = 0; x < 3; x++)
+            {
+                int index = y * 3 + x;
+                Rect slotRect = GetCraftingSlotRect(boardRect, x, y);
+                PlayerInventory.InventorySlot item = craftingSlots[index];
+
+                if (item != null)
+                {
+                    PlayerInventory.DrawInventoryItem(slotRect, item);
+                    HandleCraftingSlotDragStart(index, slotRect, item);
+                }
+            }
+        }
+    }
+
+    private void DrawCraftingResult(Rect boardRect)
+    {
+        Rect resultRect = GetCraftingResultRect(boardRect);
+
+        if (TryGetWatchRecipeRow(out _))
+        {
+            PlayerInventory.InventorySlot resultItem = CreateWorkingWatchItem();
+            PlayerInventory.DrawInventoryItem(resultRect, resultItem);
+            HandleCraftingResultDragStart(resultRect, resultItem);
+        }
+    }
+
+    private void HandleCraftingResultDragStart(Rect resultRect, PlayerInventory.InventorySlot resultItem)
+    {
+        Event currentEvent = Event.current;
+
+        if (currentEvent == null
+            || currentEvent.type != EventType.MouseDown
+            || currentEvent.button != 0
+            || craftingDragSource != CraftingDragSource.None
+            || resultItem == null
+            || !resultRect.Contains(currentEvent.mousePosition))
+        {
+            return;
+        }
+
+        craftingDragSource = CraftingDragSource.Result;
+        draggedCraftingItem = CloneItem(resultItem);
+        draggedBackpackItem = null;
+        draggedCraftingSlotIndex = -1;
+        currentEvent.Use();
+    }
+
+    private PlayerInventory.InventorySlot CreateWorkingWatchItem()
+    {
+        return new PlayerInventory.InventorySlot
+            {
+                itemName = WorkingWatchName,
+                value = WorkingWatchValue,
+                width = 2,
+                height = 1
+            };
+    }
+
+    private void DrawCraftingBackpack(Rect backpackRect)
+    {
+        if (playerInventory == null)
+        {
+            return;
+        }
+
+        playerInventory.DrawInventoryBoard(backpackRect, false, null);
+        HandleBackpackDragStart(backpackRect);
+    }
+
+    private void HandleBackpackDragStart(Rect backpackRect)
+    {
+        Event currentEvent = Event.current;
+
+        if (currentEvent == null
+            || currentEvent.type != EventType.MouseDown
+            || currentEvent.button != 0
+            || craftingDragSource != CraftingDragSource.None
+            || playerInventory == null)
+        {
+            return;
+        }
+
+        PlayerInventory.InventorySlot item = GetBackpackItemAt(backpackRect, currentEvent.mousePosition);
+
+        if (item == null)
+        {
+            return;
+        }
+
+        craftingDragSource = CraftingDragSource.Backpack;
+        draggedBackpackItem = item;
+        draggedCraftingItem = CloneItem(item);
+        draggedCraftingSlotIndex = -1;
+        currentEvent.Use();
+    }
+
+    private void HandleCraftingSlotDragStart(int slotIndex, Rect slotRect, PlayerInventory.InventorySlot item)
+    {
+        Event currentEvent = Event.current;
+
+        if (currentEvent == null
+            || currentEvent.type != EventType.MouseDown
+            || currentEvent.button != 0
+            || craftingDragSource != CraftingDragSource.None
+            || !slotRect.Contains(currentEvent.mousePosition))
+        {
+            return;
+        }
+
+        craftingDragSource = CraftingDragSource.CraftingSlot;
+        draggedCraftingSlotIndex = slotIndex;
+        draggedCraftingItem = CloneItem(item);
+        draggedBackpackItem = null;
+        currentEvent.Use();
+    }
+
+    private void HandleCraftingDragRelease(Rect boardRect, Rect backpackRect)
+    {
+        Event currentEvent = Event.current;
+
+        if (currentEvent == null
+            || currentEvent.type != EventType.MouseUp
+            || currentEvent.button != 0
+            || craftingDragSource == CraftingDragSource.None)
+        {
+            return;
+        }
+
+        Vector2 mousePosition = currentEvent.mousePosition;
+        int targetSlot = GetCraftingSlotIndexAt(boardRect, mousePosition);
+
+        if (craftingDragSource == CraftingDragSource.Backpack)
+        {
+            DropBackpackItemIntoCrafting(targetSlot);
+        }
+        else if (craftingDragSource == CraftingDragSource.CraftingSlot)
+        {
+            DropCraftingSlotItem(targetSlot, backpackRect.Contains(mousePosition));
+        }
+        else if (craftingDragSource == CraftingDragSource.Result && backpackRect.Contains(mousePosition))
+        {
+            TryClaimCraftingResult();
+        }
+
+        ClearCraftingDrag();
+        currentEvent.Use();
+    }
+
+    private void DropBackpackItemIntoCrafting(int targetSlot)
+    {
+        if (playerInventory == null || draggedBackpackItem == null || targetSlot < 0)
+        {
+            return;
+        }
+
+        if (craftingSlots[targetSlot] != null)
+        {
+            ShowMessage("Crafting slot is occupied.");
+            return;
+        }
+
+        if (!playerInventory.RemoveItem(draggedBackpackItem))
+        {
+            return;
+        }
+
+        craftingSlots[targetSlot] = CloneItem(draggedBackpackItem);
+        ShowMessage("Placed " + draggedBackpackItem.itemName + ".");
+    }
+
+    private bool TryClaimCraftingResult()
+    {
+        if (playerInventory == null)
+        {
+            ShowMessage("No backpack found.");
+            return false;
+        }
+
+        if (!TryGetWatchRecipeRow(out int rowStart))
+        {
+            return false;
+        }
+
+        if (!playerInventory.AddItem(WorkingWatchName, WorkingWatchValue, 2, 1))
+        {
+            ShowMessage("Need 2x1 space in backpack.");
+            return false;
+        }
+
+        for (int i = rowStart; i < rowStart + 3; i++)
+        {
+            craftingSlots[i] = null;
+        }
+
+        ShowMessage("Crafted " + WorkingWatchName + "!");
+        return true;
+    }
+
+    private void DropCraftingSlotItem(int targetSlot, bool droppedOnBackpack)
+    {
+        if (draggedCraftingSlotIndex < 0 || draggedCraftingSlotIndex >= craftingSlots.Length)
+        {
+            return;
+        }
+
+        if (droppedOnBackpack)
+        {
+            ReturnCraftingSlotToBackpack(draggedCraftingSlotIndex);
+            return;
+        }
+
+        if (targetSlot < 0 || targetSlot == draggedCraftingSlotIndex)
+        {
+            return;
+        }
+
+        PlayerInventory.InventorySlot sourceItem = craftingSlots[draggedCraftingSlotIndex];
+        craftingSlots[draggedCraftingSlotIndex] = craftingSlots[targetSlot];
+        craftingSlots[targetSlot] = sourceItem;
+    }
+
+    private PlayerInventory.InventorySlot GetBackpackItemAt(Rect backpackRect, Vector2 mousePosition)
+    {
+        if (playerInventory == null)
+        {
+            return null;
+        }
+
+        for (int i = playerInventory.items.Count - 1; i >= 0; i--)
+        {
+            PlayerInventory.InventorySlot item = playerInventory.items[i];
+            Rect itemRect = PlayerInventory.GetInventoryItemRect(backpackRect, playerInventory.gridSize, item);
+
+            if (itemRect.Contains(mousePosition))
+            {
+                return item;
+            }
+        }
+
+        return null;
+    }
+
+    private int GetCraftingSlotIndexAt(Rect boardRect, Vector2 mousePosition)
+    {
+        for (int y = 0; y < 3; y++)
+        {
+            for (int x = 0; x < 3; x++)
+            {
+                Rect slotRect = GetCraftingSlotRect(boardRect, x, y);
+
+                if (slotRect.Contains(mousePosition))
+                {
+                    return y * 3 + x;
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    private void DrawCraftingDragGhost()
+    {
+        if (craftingDragSource == CraftingDragSource.None || draggedCraftingItem == null)
+        {
+            return;
+        }
+
+        Vector2 mousePosition = Event.current != null ? Event.current.mousePosition : Vector2.zero;
+        float size = Mathf.Clamp(Screen.height * 0.08f, 56f, 88f);
+        Rect ghostRect = new Rect(mousePosition.x - size * 0.5f, mousePosition.y - size * 0.5f, size, size);
+        Color previousColor = GUI.color;
+        GUI.color = new Color(1f, 1f, 1f, 0.86f);
+        PlayerInventory.DrawInventoryItem(ghostRect, draggedCraftingItem);
+        GUI.color = previousColor;
+    }
+
+    private void ClearCraftingDrag()
+    {
+        craftingDragSource = CraftingDragSource.None;
+        draggedCraftingItem = null;
+        draggedBackpackItem = null;
+        draggedCraftingSlotIndex = -1;
+    }
+
+    private static Rect GetCraftingSlotRect(Rect boardRect, int x, int y)
+    {
+        float slotWidth = boardRect.width * (108f / 1448f);
+        float slotHeight = boardRect.height * (112f / 1086f);
+        float stepX = boardRect.width * (131.5f / 1448f);
+        float stepY = boardRect.height * (136.5f / 1086f);
+        float startX = boardRect.x + boardRect.width * (362f / 1448f);
+        float startY = boardRect.y + boardRect.height * (378f / 1086f);
+        return new Rect(startX + x * stepX, startY + y * stepY, slotWidth, slotHeight);
+    }
+
+    private static Rect GetCraftingResultRect(Rect boardRect)
+    {
+        return new Rect(
+            boardRect.x + boardRect.width * (848f / 1448f),
+            boardRect.y + boardRect.height * (501f / 1086f),
+            boardRect.width * (206f / 1448f),
+            boardRect.height * (202f / 1086f));
     }
 }
 

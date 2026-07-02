@@ -4,6 +4,9 @@ using System.Collections.Generic;
 
 public class GroundScanner : MonoBehaviour
 {
+    private const float SearchAreaCacheRefreshInterval = 0.5f;
+    private const float TreasureCacheRefreshInterval = 0.35f;
+
     public Transform scanOrigin;
     public float scanRadius = 0.16f;
     public float scanDistanceForward = 0f;
@@ -20,6 +23,7 @@ public class GroundScanner : MonoBehaviour
     public bool alignMarkersToTerrain = true;
     public float terrainMarkerYOffset = 0.04f;
     public bool requireUnlockedSearchArea = true;
+    public bool showGridOnlyInsideUnlockedSearchAreas = true;
     public DetectorBattery detectorBattery;
 
     private float scanTimer;
@@ -39,9 +43,16 @@ public class GroundScanner : MonoBehaviour
     private readonly HashSet<Vector2Int> currentScanCells = new HashSet<Vector2Int>();
     private readonly List<GameObject> temporaryScannedCellMarkers = new List<GameObject>();
     private MetalDetector metalDetector;
+    private SearchArea[] cachedSearchAreas = new SearchArea[0];
+    private DetectableTreasure[] cachedTreasures = new DetectableTreasure[0];
+    private float nextSearchAreaCacheRefreshTime = -1f;
+    private float nextTreasureCacheRefreshTime = -1f;
 
     private void Awake()
     {
+        metalDetector = GetComponent<MetalDetector>();
+        ResolveScanOrigin();
+
         markerParent = new GameObject("Scan Markers");
         previewGridParent = new GameObject("Scan Preview Grid");
         permanentScannedCellMaterial = CreateTransparentMaterial(new Color(0.95f, 0.86f, 0.58f, 0.045f));
@@ -59,12 +70,12 @@ public class GroundScanner : MonoBehaviour
         {
             detectorBattery = gameObject.AddComponent<DetectorBattery>();
         }
-
-        metalDetector = GetComponent<MetalDetector>();
     }
 
     private void Update()
     {
+        ResolveScanOrigin();
+
         if (GameUIState.AnyMenuOpen || Mouse.current == null || !Mouse.current.leftButton.isPressed)
         {
             wasScanningLastFrame = false;
@@ -103,7 +114,8 @@ public class GroundScanner : MonoBehaviour
 
         wasScanningLastFrame = true;
         timeSinceLastScan = 0f;
-        SetPreviewGridVisible(true);
+        bool showGridAtScan = ShouldShowGridAt(scanPosition);
+        SetPreviewGridVisible(showGridAtScan);
 
         scanTimer -= Time.deltaTime;
 
@@ -113,13 +125,13 @@ public class GroundScanner : MonoBehaviour
         }
 
         scanTimer = scanInterval;
-        MarkScannedSpot(scanPosition);
+        MarkScannedSpot(scanPosition, showGridAtScan);
         RevealTreasuresInScan();
     }
 
     private Vector3 GetScanPosition()
     {
-        Transform origin = scanOrigin != null ? scanOrigin : transform;
+        Transform origin = GetEffectiveScanOrigin();
         Vector3 forward = new Vector3(origin.forward.x, 0f, origin.forward.z).normalized;
 
         if (forward.sqrMagnitude < 0.01f)
@@ -131,7 +143,31 @@ public class GroundScanner : MonoBehaviour
         return new Vector3(scanPosition.x, markerYPosition, scanPosition.z);
     }
 
-    private void MarkScannedSpot(Vector3 scanPosition)
+    private Transform GetEffectiveScanOrigin()
+    {
+        ResolveScanOrigin();
+        return scanOrigin != null ? scanOrigin : transform;
+    }
+
+    private void ResolveScanOrigin()
+    {
+        if (metalDetector == null)
+        {
+            metalDetector = GetComponent<MetalDetector>();
+        }
+
+        if (metalDetector == null || metalDetector.detectorHead == null)
+        {
+            return;
+        }
+
+        if (scanOrigin == null || scanOrigin == transform)
+        {
+            scanOrigin = metalDetector.detectorHead;
+        }
+    }
+
+    private void MarkScannedSpot(Vector3 scanPosition, bool showGridAtScan)
     {
         currentScanCells.Clear();
         Vector2Int centerCell = WorldToCell(scanPosition);
@@ -144,22 +180,25 @@ public class GroundScanner : MonoBehaviour
         {
             for (int y = 0; y < depth; y++)
             {
-                MarkCurrentScanCell(new Vector2Int(minX + x, minY + y));
+                MarkCurrentScanCell(new Vector2Int(minX + x, minY + y), showGridAtScan);
             }
         }
 
         if (hasPreviousScannedCell)
         {
-            FillCellsBetween(previousScannedCell, centerCell, width, depth);
+            FillCellsBetween(previousScannedCell, centerCell, width, depth, showGridAtScan);
         }
 
         previousScannedCell = centerCell;
         hasPreviousScannedCell = true;
 
-        GameEvents.ReportScannedCells(scannedCells.Count);
+        if (showGridAtScan)
+        {
+            GameEvents.ReportScannedCells(scannedCells.Count);
+        }
     }
 
-    private void MarkCurrentScanCell(Vector2Int cell)
+    private void MarkCurrentScanCell(Vector2Int cell, bool showGridAtScan)
     {
         if (!CanScanCell(cell))
         {
@@ -167,7 +206,11 @@ public class GroundScanner : MonoBehaviour
         }
 
         currentScanCells.Add(cell);
-        MarkScannedCell(cell);
+
+        if (showGridAtScan)
+        {
+            MarkScannedCell(cell);
+        }
     }
 
     private void MarkScannedCell(Vector2Int cell)
@@ -189,7 +232,7 @@ public class GroundScanner : MonoBehaviour
         CreateScannedCellMarker(CellToWorld(cell), scannedCellFillMaterial, "Scanned Grid Cell Fresh", markerYPosition + 0.003f, true);
     }
 
-    private void FillCellsBetween(Vector2Int fromCell, Vector2Int toCell, int width, int depth)
+    private void FillCellsBetween(Vector2Int fromCell, Vector2Int toCell, int width, int depth, bool showGridAtScan)
     {
         int steps = Mathf.Max(Mathf.Abs(toCell.x - fromCell.x), Mathf.Abs(toCell.y - fromCell.y));
 
@@ -210,7 +253,7 @@ public class GroundScanner : MonoBehaviour
             {
                 for (int y = 0; y < depth; y++)
                 {
-                    MarkCurrentScanCell(new Vector2Int(minX + x, minY + y));
+                    MarkCurrentScanCell(new Vector2Int(minX + x, minY + y), showGridAtScan);
                 }
             }
         }
@@ -435,6 +478,11 @@ public class GroundScanner : MonoBehaviour
         return CanScanAt(GetScanPosition());
     }
 
+    public bool CanScanAtWorldPosition(Vector3 worldPosition)
+    {
+        return CanScanAt(worldPosition);
+    }
+
     public int GetCellDistanceFromCurrentScan(Vector3 worldPosition)
     {
         Vector2Int centerCell = WorldToCell(GetScanPosition());
@@ -482,22 +530,51 @@ public class GroundScanner : MonoBehaviour
             return true;
         }
 
-        SearchArea[] searchAreas = FindObjectsByType<SearchArea>();
+        SearchArea searchArea = FindSearchAreaAt(worldPosition);
 
-        if (searchAreas.Length == 0)
+        if (searchArea == null)
         {
             return true;
         }
 
+        return searchArea.isUnlocked;
+    }
+
+    private bool ShouldShowGridAt(Vector3 worldPosition)
+    {
+        if (!showGridOnlyInsideUnlockedSearchAreas)
+        {
+            return true;
+        }
+
+        SearchArea searchArea = FindSearchAreaAt(worldPosition);
+        return searchArea != null && searchArea.isUnlocked;
+    }
+
+    private SearchArea FindSearchAreaAt(Vector3 worldPosition)
+    {
+        SearchArea[] searchAreas = GetSearchAreas();
+
         foreach (SearchArea searchArea in searchAreas)
         {
-            if (searchArea != null && searchArea.isUnlocked && searchArea.Contains(worldPosition))
+            if (searchArea != null && searchArea.Contains(worldPosition))
             {
-                return true;
+                return searchArea;
             }
         }
 
-        return false;
+        return null;
+    }
+
+    private SearchArea[] GetSearchAreas()
+    {
+        if (cachedSearchAreas == null || Time.unscaledTime >= nextSearchAreaCacheRefreshTime)
+        {
+            cachedSearchAreas = FindObjectsByType<SearchArea>();
+            nextSearchAreaCacheRefreshTime = Time.unscaledTime + SearchAreaCacheRefreshInterval;
+        }
+
+        return cachedSearchAreas;
     }
 
     private void ClearChildren(GameObject parent)
@@ -520,7 +597,7 @@ public class GroundScanner : MonoBehaviour
             return;
         }
 
-        DetectableTreasure[] treasures = FindObjectsByType<DetectableTreasure>();
+        DetectableTreasure[] treasures = GetDetectableTreasures();
 
         foreach (DetectableTreasure treasure in treasures)
         {
@@ -545,6 +622,17 @@ public class GroundScanner : MonoBehaviour
                 metalDetector.ReportTreasureRevealed(treasure);
             }
         }
+    }
+
+    private DetectableTreasure[] GetDetectableTreasures()
+    {
+        if (cachedTreasures == null || Time.unscaledTime >= nextTreasureCacheRefreshTime)
+        {
+            cachedTreasures = FindObjectsByType<DetectableTreasure>();
+            nextTreasureCacheRefreshTime = Time.unscaledTime + TreasureCacheRefreshInterval;
+        }
+
+        return cachedTreasures;
     }
 
     private SearchMarker CreateTreasureRevealMarker(DetectableTreasure treasure, Vector2Int treasureCell)

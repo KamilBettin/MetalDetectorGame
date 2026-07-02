@@ -6,7 +6,6 @@ using UnityEngine.UI;
 public class PauseMenuUI : MonoBehaviour
 {
     private const string BackgroundResourcePath = "UI/PauseMenuBackground";
-    private const string SavePrefix = "MetalDetector.Save.";
 
     private readonly string[] menuItems =
     {
@@ -23,6 +22,7 @@ public class PauseMenuUI : MonoBehaviour
     private RectTransform selectionFrame;
     private Text messageText;
     private int selectedIndex;
+    private int hoveredIndex = -1;
     private float messageTimer;
     private bool isOpen;
 
@@ -55,7 +55,7 @@ public class PauseMenuUI : MonoBehaviour
                 return;
             }
 
-            if (!GameUIState.IsInventoryOpen && !GameUIState.IsTraderMenuOpen && !GameUIState.IsHomeMenuOpen)
+            if (!GameUIState.IsInventoryOpen && !GameUIState.IsTraderMenuOpen && !GameUIState.IsQuestMenuOpen && !GameUIState.IsHomeMenuOpen)
             {
                 SetOpen(true);
             }
@@ -162,7 +162,8 @@ public class PauseMenuUI : MonoBehaviour
             button.onClick.AddListener(() => ActivateItem(itemIndex));
 
             EventTrigger trigger = buttonTransform.gameObject.AddComponent<EventTrigger>();
-            AddEventTrigger(trigger, EventTriggerType.PointerEnter, () => SetSelected(itemIndex));
+            AddEventTrigger(trigger, EventTriggerType.PointerEnter, () => HandlePointerEnter(itemIndex));
+            AddEventTrigger(trigger, EventTriggerType.PointerExit, () => HandlePointerExit(itemIndex));
         }
     }
 
@@ -174,7 +175,7 @@ public class PauseMenuUI : MonoBehaviour
         selectionFrame.pivot = new Vector2(0f, 1f);
 
         Image frameImage = selectionFrame.gameObject.AddComponent<Image>();
-        frameImage.color = new Color(1f, 0.78f, 0.24f, 0.16f);
+        frameImage.color = new Color(1f, 0.82f, 0.32f, 0.08f);
         frameImage.raycastTarget = false;
         SetSelected(0);
     }
@@ -268,31 +269,21 @@ public class PauseMenuUI : MonoBehaviour
 
     private void SaveGame()
     {
-        Transform player = FindLocalPlayer();
-        PlayerInventory inventory = player != null ? player.GetComponent<PlayerInventory>() : FindAnyObjectByType<PlayerInventory>();
-
-        if (player != null)
-        {
-            PlayerPrefs.SetFloat(SavePrefix + "PlayerX", player.position.x);
-            PlayerPrefs.SetFloat(SavePrefix + "PlayerY", player.position.y);
-            PlayerPrefs.SetFloat(SavePrefix + "PlayerZ", player.position.z);
-            PlayerPrefs.SetFloat(SavePrefix + "PlayerRotY", player.eulerAngles.y);
-        }
-
-        if (inventory != null)
-        {
-            PlayerPrefs.SetInt(SavePrefix + "Money", inventory.money);
-            PlayerPrefs.SetInt(SavePrefix + "GridSize", inventory.gridSize);
-        }
-
-        PlayerPrefs.SetString(SavePrefix + "SavedAt", System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-        PlayerPrefs.Save();
-        ShowMessage("Game saved.");
+        GameSaveSystem.SaveCurrentGame(out string saveMessage);
+        ShowMessage(saveMessage);
     }
 
     private void ReturnToMainMenu()
     {
-        LocalCoopManager.Instance?.StopSession();
+        LocalCoopManager coopManager = LocalCoopManager.Instance;
+        bool isMultiplayer = coopManager != null && coopManager.IsRunning;
+
+        if (!isMultiplayer)
+        {
+            GameSaveSystem.CapturePauseResumeSnapshotIfSolo();
+        }
+
+        coopManager?.StopSession();
         SetOpen(false);
 
         if (FindAnyObjectByType<StartMenuUI>() == null)
@@ -328,15 +319,28 @@ public class PauseMenuUI : MonoBehaviour
 
         if (isOpen)
         {
+            hoveredIndex = -1;
             SetSelected(0);
         }
     }
 
     private void SetSelected(int itemIndex)
     {
+        SetSelected(itemIndex, true);
+    }
+
+    private void SetSelected(int itemIndex, bool showFrame)
+    {
         selectedIndex = Mathf.Clamp(itemIndex, 0, menuItems.Length - 1);
 
         if (selectionFrame == null)
+        {
+            return;
+        }
+
+        selectionFrame.gameObject.SetActive(showFrame);
+
+        if (!showFrame)
         {
             return;
         }
@@ -361,8 +365,25 @@ public class PauseMenuUI : MonoBehaviour
             new Vector2(430f, 70f)
         };
 
-        selectionFrame.anchoredPosition = positions[selectedIndex];
-        selectionFrame.sizeDelta = sizes[selectedIndex];
+        selectionFrame.anchoredPosition = positions[selectedIndex] + new Vector2(8f, -14f);
+        selectionFrame.sizeDelta = sizes[selectedIndex] - new Vector2(16f, 18f);
+    }
+
+    private void HandlePointerEnter(int itemIndex)
+    {
+        hoveredIndex = itemIndex;
+        SetSelected(itemIndex);
+    }
+
+    private void HandlePointerExit(int itemIndex)
+    {
+        if (hoveredIndex != itemIndex)
+        {
+            return;
+        }
+
+        hoveredIndex = -1;
+        SetSelected(selectedIndex, false);
     }
 
     private void ShowMessage(string message)

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public static class GameGui
@@ -10,6 +11,7 @@ public static class GameGui
     private static GUIStyle buttonStyle;
     private static GUIStyle slotStyle;
     private static Texture2D whiteTexture;
+    private static readonly Dictionary<string, Texture2D> iconTextures = new Dictionary<string, Texture2D>();
 
     public static Color PanelColor => new Color(0.07f, 0.08f, 0.07f, 0.78f);
     public static Color PanelBorderColor => new Color(1f, 0.84f, 0.42f, 0.55f);
@@ -119,6 +121,30 @@ public static class GameGui
     {
         EnsureStyles();
         return GUI.Button(rect, label, buttonStyle);
+    }
+
+    public static void DrawIcon(Rect rect, string iconName, Color tint)
+    {
+        if (string.IsNullOrEmpty(iconName))
+        {
+            return;
+        }
+
+        if (!iconTextures.TryGetValue(iconName, out Texture2D texture))
+        {
+            texture = Resources.Load<Texture2D>("UI/Icons/" + iconName);
+            iconTextures[iconName] = texture;
+        }
+
+        if (texture == null)
+        {
+            return;
+        }
+
+        Color oldColor = GUI.color;
+        GUI.color = tint;
+        GUI.DrawTexture(rect, texture, ScaleMode.ScaleToFit, true);
+        GUI.color = oldColor;
     }
 
     public static void DrawRect(Rect rect, Color color)

@@ -6,9 +6,10 @@ public static class GameUIState
     public static bool IsPauseMenuOpen { get; private set; }
     public static bool IsInventoryOpen { get; private set; }
     public static bool IsTraderMenuOpen { get; private set; }
+    public static bool IsQuestMenuOpen { get; private set; }
     public static bool IsHomeMenuOpen { get; private set; }
     public static bool IsIntroLetterOpen { get; private set; }
-    public static bool AnyMenuOpen => IsStartMenuOpen || IsPauseMenuOpen || IsInventoryOpen || IsTraderMenuOpen || IsHomeMenuOpen || IsIntroLetterOpen;
+    public static bool AnyMenuOpen => IsStartMenuOpen || IsPauseMenuOpen || IsInventoryOpen || IsTraderMenuOpen || IsQuestMenuOpen || IsHomeMenuOpen || IsIntroLetterOpen;
 
     public static void SetStartMenuOpen(bool isOpen)
     {
@@ -31,6 +32,12 @@ public static class GameUIState
     public static void SetTraderMenuOpen(bool isOpen)
     {
         IsTraderMenuOpen = isOpen;
+        RefreshCursor();
+    }
+
+    public static void SetQuestMenuOpen(bool isOpen)
+    {
+        IsQuestMenuOpen = isOpen;
         RefreshCursor();
     }
 

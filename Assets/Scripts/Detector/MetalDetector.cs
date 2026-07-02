@@ -3,6 +3,9 @@ using UnityEngine.InputSystem;
 
 public class MetalDetector : MonoBehaviour
 {
+    private const float SignalRefreshInterval = 0.08f;
+    private const float TreasureCacheRefreshInterval = 0.35f;
+
     public float detectionRange = 6f;
     public float strongSignalDistance = 1.5f;
     public float farBeepDelay = 1.15f;
@@ -24,8 +27,9 @@ public class MetalDetector : MonoBehaviour
     public float DetectionRange => detectionRange;
     public float CurrentSignal => currentSignal;
     public DetectableTreasure NearestTreasure => nearestTreasure;
-    public int CurrentSignalRangeCells => Mathf.Max(1, Mathf.RoundToInt(detectionRange));
+    public int CurrentSignalRangeCells => GetCurrentSignalRangeCells();
     public int CurrentSignalCellDistance => currentSignalCellDistance;
+    public float CurrentSignalDistanceMeters => currentSignalCellDistance < 0 ? -1f : currentSignalCellDistance * GetSignalCellSize();
     public bool RevealSignalActive => nearestTreasure != null && nearestTreasure.isRevealed && !nearestTreasure.isFound;
     public int DetectorTier => Mathf.Clamp(detectorTier, 0, MaxDetectorTier);
     public int MaxDetectorTier => detectorScanSizes != null && detectorScanSizes.Length > 0 ? detectorScanSizes.Length - 1 : 0;
@@ -35,7 +39,7 @@ public class MetalDetector : MonoBehaviour
 
     public void IncreaseRange(float amount)
     {
-        detectionRange += amount;
+        detectionRange = Mathf.Max(0.1f, detectionRange + amount);
     }
 
     public void ReportTreasureRevealed(DetectableTreasure treasure)
@@ -95,6 +99,9 @@ public class MetalDetector : MonoBehaviour
     private AudioClip commonBeepClip;
     private AudioClip rareBeepClip;
     private AudioClip epicBeepClip;
+    private DetectableTreasure[] cachedTreasures = new DetectableTreasure[0];
+    private float nextSignalRefreshTime;
+    private float nextTreasureCacheRefreshTime = -1f;
 
     private void Awake()
     {
@@ -113,8 +120,25 @@ public class MetalDetector : MonoBehaviour
 
     private void Update()
     {
-        FindNearestTreasure();
+        UpdateNearestTreasure();
         UpdateBeep();
+    }
+
+    private void UpdateNearestTreasure()
+    {
+        if (DayNightCycle.IsNightNow || !IsScanInputHeld())
+        {
+            FindNearestTreasure();
+            return;
+        }
+
+        if (Time.unscaledTime < nextSignalRefreshTime)
+        {
+            return;
+        }
+
+        nextSignalRefreshTime = Time.unscaledTime + SignalRefreshInterval;
+        FindNearestTreasure();
     }
 
     private void FindNearestTreasure()
@@ -133,7 +157,7 @@ public class MetalDetector : MonoBehaviour
             return;
         }
 
-        DetectableTreasure[] treasures = FindObjectsByType<DetectableTreasure>();
+        DetectableTreasure[] treasures = GetDetectableTreasures();
         DetectableTreasure closestTreasure = null;
         int maxSignalCells = CurrentSignalRangeCells;
         int closestCellDistance = maxSignalCells + 1;
@@ -147,11 +171,18 @@ public class MetalDetector : MonoBehaviour
 
             int cellDistance = GetCellDistanceToTreasure(treasure);
 
-            if (cellDistance <= maxSignalCells && cellDistance < closestCellDistance)
+            if (cellDistance > maxSignalCells || cellDistance >= closestCellDistance)
             {
-                closestCellDistance = cellDistance;
-                closestTreasure = treasure;
+                continue;
             }
+
+            if (groundScanner != null && !groundScanner.CanScanAtWorldPosition(treasure.transform.position))
+            {
+                continue;
+            }
+
+            closestCellDistance = cellDistance;
+            closestTreasure = treasure;
         }
 
         if (closestTreasure == null)
@@ -161,6 +192,17 @@ public class MetalDetector : MonoBehaviour
         }
 
         SetSignal(closestTreasure, closestCellDistance, GetSignalForCellDistance(closestCellDistance, maxSignalCells));
+    }
+
+    private DetectableTreasure[] GetDetectableTreasures()
+    {
+        if (cachedTreasures == null || Time.unscaledTime >= nextTreasureCacheRefreshTime)
+        {
+            cachedTreasures = FindObjectsByType<DetectableTreasure>();
+            nextTreasureCacheRefreshTime = Time.unscaledTime + TreasureCacheRefreshInterval;
+        }
+
+        return cachedTreasures;
     }
 
     private void UpdateBeep()
@@ -237,6 +279,17 @@ public class MetalDetector : MonoBehaviour
         return Mathf.Clamp01((maxSignalCells - cellDistance + 1f) / (maxSignalCells + 1f));
     }
 
+    private int GetCurrentSignalRangeCells()
+    {
+        return Mathf.Max(1, Mathf.CeilToInt(detectionRange / GetSignalCellSize()));
+    }
+
+    private float GetSignalCellSize()
+    {
+        CacheGroundScanner();
+        return groundScanner != null && groundScanner.gridCellSize > 0f ? groundScanner.gridCellSize : 1f;
+    }
+
     private float GetGroundDistance(Vector3 firstPosition, Vector3 secondPosition)
     {
         Vector2 first = new Vector2(firstPosition.x, firstPosition.z);
@@ -294,7 +347,7 @@ public class MetalDetector : MonoBehaviour
         string stateText = nearestTreasure == null
             ? "No buried signal nearby"
             : RevealSignalActive ? "Target marked"
-            : currentSignalCellDistance <= 0 ? "Scan here to mark target" : "Buried ping: " + currentSignalCellDistance + " cells";
+            : currentSignalCellDistance <= 0 ? "Scan here to mark target" : "Buried ping: " + CurrentSignalDistanceMeters.ToString("0.0") + "m";
         Color signalColor = currentSignal > 0.8f
             ? GameGui.GoodColor
             : Color.Lerp(GameGui.MutedTextColor, GameGui.AccentColor, currentSignal);
@@ -311,7 +364,7 @@ public class MetalDetector : MonoBehaviour
 
         if (nearestTreasure != null && RevealSignalActive)
         {
-            GameGui.DrawToast(new Rect(20, 144, 300, 38), "Target marked. Dig on the glowing spot.");
+            GameGui.DrawToast(new Rect(20, 144, 300, 38), "Target marked. Dig under the arrow.");
         }
     }
 }
