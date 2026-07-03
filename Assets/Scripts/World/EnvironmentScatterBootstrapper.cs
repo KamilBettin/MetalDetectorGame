@@ -140,6 +140,7 @@ public static class EnvironmentScatterBootstrapper
 
         float waterLevel = GetWaterLevel();
         GameObject root = new GameObject(ScatterRootName);
+        fallbackMaterialCache.Clear();
         Random.State previousRandomState = Random.state;
         Random.InitState(RandomSeed);
 
@@ -688,9 +689,10 @@ public static class EnvironmentScatterBootstrapper
         string materialContext = sourceMaterial.name + " " + rendererName + " " + instanceName;
         string alphaContext = sourceMaterial.name + " " + rendererName;
         Texture baseTexture = GetMaterialTexture(sourceMaterial, "_BaseMap", "_BaseTexture", "_BASETEXTURE", "_BaseColorMap", "_MainTex");
+        bool vegetationMaterial = IsVegetationMaterial(alphaContext);
         bool alphaClipped = ShouldAlphaClipMaterial(sourceMaterial, alphaContext);
-        float cutoff = GetMaterialFloat(sourceMaterial, 0.5f, "_Cutoff", "_MaskClipValue");
-        Color tint = GetMaterialColor(sourceMaterial, GetReadableTint(materialContext), "_BaseColor", "_Color");
+        float cutoff = GetVegetationCutoff(sourceMaterial, vegetationMaterial);
+        Color tint = GetFallbackTint(sourceMaterial, materialContext, vegetationMaterial);
         Material material = CreateFallbackMaterial(tint, baseTexture, alphaClipped, sourceMaterial.name + "_Fallback", cutoff);
         fallbackMaterialCache[sourceMaterial] = material;
         return material;
@@ -730,12 +732,14 @@ public static class EnvironmentScatterBootstrapper
         if (alphaClipped)
         {
             SetMaterialFloat(material, 1f, "_AlphaClip");
-            SetMaterialFloat(material, 1f, "_AlphaToMask");
+            SetMaterialFloat(material, 0f, "_AlphaToMask");
             SetMaterialFloat(material, 0f, "_Surface");
             SetMaterialFloat(material, Mathf.Clamp(cutoff, 0.05f, 0.95f), "_Cutoff");
             SetMaterialFloat(material, 0f, "_Cull", "_CullMode");
             SetMaterialFloat(material, 1f, "_ZWrite");
+            SetMaterialFloat(material, 0f, "_ReceiveShadows");
             material.EnableKeyword("_ALPHATEST_ON");
+            material.EnableKeyword("_RECEIVE_SHADOWS_OFF");
             material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
             material.DisableKeyword("_ALPHABLEND_ON");
             material.SetOverrideTag("RenderType", "TransparentCutout");
@@ -777,6 +781,30 @@ public static class EnvironmentScatterBootstrapper
     {
         return IsVegetationMaterial(materialContext)
             || HasAlphaKeyword(material);
+    }
+
+    private static float GetVegetationCutoff(Material material, bool vegetationMaterial)
+    {
+        float cutoff = GetMaterialFloat(material, 0.5f, "_Cutoff", "_MaskClipValue");
+        return vegetationMaterial ? Mathf.Max(cutoff, 0.52f) : cutoff;
+    }
+
+    private static Color GetFallbackTint(Material material, string materialContext, bool vegetationMaterial)
+    {
+        Color fallback = GetReadableTint(materialContext);
+        Color tint = GetMaterialColor(material, fallback, "_BaseColor", "_Color");
+
+        if (vegetationMaterial && IsNearWhite(tint))
+        {
+            return fallback;
+        }
+
+        return tint;
+    }
+
+    private static bool IsNearWhite(Color color)
+    {
+        return color.r > 0.88f && color.g > 0.88f && color.b > 0.88f;
     }
 
     private static bool HasAlphaKeyword(Material material)
