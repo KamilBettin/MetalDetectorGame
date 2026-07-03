@@ -2,9 +2,15 @@ using UnityEngine;
 
 public class SearchMarker : MonoBehaviour
 {
-    private const float FoundGroundDiscScale = 0.32f;
-    private const float FoundGroundDiscThickness = 0.006f;
-    private const float FoundArrowYOffset = 0.54f;
+    private const float FoundGroundDiscScale = 0.09f;
+    private const float FoundGroundDiscThickness = 0.004f;
+    private const float FoundRippleMinRadius = 0.16f;
+    private const float FoundRippleMaxRadius = 1.1f;
+    private const float FoundRippleThickness = 0.018f;
+    private const float FoundRippleHeight = 0.007f;
+    private const float FoundRippleCycleDuration = 1.55f;
+    private const int FoundRippleCount = 3;
+    private const float FoundArrowYOffset = 0.58f;
     private const float FoundArrowBobAmount = 0.07f;
     private const float FoundArrowBobSpeed = 3.2f;
     private const float FoundArrowHeadHeight = 0.17f;
@@ -24,12 +30,20 @@ public class SearchMarker : MonoBehaviour
     public float pulseSpeed = 4f;
     public float pulseAmount = 0.25f;
 
+    private class RippleRing
+    {
+        public Transform transform;
+        public Renderer renderer;
+        public float offset;
+    }
+
     private Vector3 startScale;
     private Renderer markerRenderer;
     private Renderer[] markerRenderers;
     private Transform floatingArrow;
     private Transform groundPulse;
     private Vector3 groundPulseStartScale;
+    private readonly RippleRing[] rippleRings = new RippleRing[FoundRippleCount];
     private Color baseColor;
     private float animationSeed;
 
@@ -79,6 +93,11 @@ public class SearchMarker : MonoBehaviour
             material.SetFloat("_Surface", 1f);
         }
 
+        if (material.HasProperty("_Mode"))
+        {
+            material.SetFloat("_Mode", 3f);
+        }
+
         if (material.HasProperty("_AlphaClip"))
         {
             material.SetFloat("_AlphaClip", 0f);
@@ -95,6 +114,9 @@ public class SearchMarker : MonoBehaviour
         material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
         material.SetInt("_ZWrite", 0);
         material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        material.EnableKeyword("_ALPHABLEND_ON");
+        material.DisableKeyword("_ALPHATEST_ON");
+        material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
         material.renderQueue = 3000;
 
         return material;
@@ -124,7 +146,7 @@ public class SearchMarker : MonoBehaviour
 
         transform.localScale = Vector3.one;
         CreateGroundPulse();
-        CreateFloatingArrow();
+        CreateRippleRings();
         markerRenderers = GetComponentsInChildren<Renderer>(true);
     }
 
@@ -141,7 +163,7 @@ public class SearchMarker : MonoBehaviour
 
         if (discRenderer != null)
         {
-            Color discColor = new Color(baseColor.r, baseColor.g, baseColor.b, 0.14f);
+            Color discColor = new Color(baseColor.r, baseColor.g, baseColor.b, 0.10f);
             discRenderer.material = CreateTransparentMaterial(discColor);
             discRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             discRenderer.receiveShadows = false;
@@ -149,6 +171,33 @@ public class SearchMarker : MonoBehaviour
 
         groundPulse = disc.transform;
         groundPulseStartScale = disc.transform.localScale;
+    }
+
+    private void CreateRippleRings()
+    {
+        Mesh ringMesh = CreateFlatRingMesh(FoundRippleThickness);
+
+        for (int i = 0; i < FoundRippleCount; i++)
+        {
+            GameObject ring = new GameObject("Radar Dig Ripple");
+            ring.transform.SetParent(transform, false);
+            ring.transform.localPosition = Vector3.up * (FoundRippleHeight + i * 0.0015f);
+            ring.transform.localRotation = Quaternion.identity;
+
+            MeshFilter meshFilter = ring.AddComponent<MeshFilter>();
+            MeshRenderer meshRenderer = ring.AddComponent<MeshRenderer>();
+            meshFilter.sharedMesh = ringMesh;
+            meshRenderer.material = CreateTransparentMaterial(new Color(baseColor.r, baseColor.g, baseColor.b, 0.24f));
+            meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            meshRenderer.receiveShadows = false;
+
+            rippleRings[i] = new RippleRing
+            {
+                transform = ring.transform,
+                renderer = meshRenderer,
+                offset = i / (float)FoundRippleCount
+            };
+        }
     }
 
     private void CreateFloatingArrow()
@@ -243,6 +292,61 @@ public class SearchMarker : MonoBehaviour
         return mesh;
     }
 
+    private Mesh CreateFlatRingMesh(float thickness)
+    {
+        const int segments = 80;
+        Vector3[] vertices = new Vector3[segments * 2];
+        Vector2[] uvs = new Vector2[segments * 2];
+        int[] triangles = new int[segments * 12];
+        float innerRadius = Mathf.Max(0.05f, 0.5f - thickness);
+        float outerRadius = 0.5f + thickness;
+
+        for (int i = 0; i < segments; i++)
+        {
+            float angle = i / (float)segments * Mathf.PI * 2f;
+            float x = Mathf.Cos(angle);
+            float z = Mathf.Sin(angle);
+            vertices[i * 2] = new Vector3(x * innerRadius, 0f, z * innerRadius);
+            vertices[i * 2 + 1] = new Vector3(x * outerRadius, 0f, z * outerRadius);
+            uvs[i * 2] = new Vector2(i / (float)segments, 0f);
+            uvs[i * 2 + 1] = new Vector2(i / (float)segments, 1f);
+        }
+
+        int triangleIndex = 0;
+
+        for (int i = 0; i < segments; i++)
+        {
+            int next = (i + 1) % segments;
+            int innerCurrent = i * 2;
+            int outerCurrent = innerCurrent + 1;
+            int innerNext = next * 2;
+            int outerNext = innerNext + 1;
+
+            triangles[triangleIndex++] = innerCurrent;
+            triangles[triangleIndex++] = outerCurrent;
+            triangles[triangleIndex++] = outerNext;
+            triangles[triangleIndex++] = innerCurrent;
+            triangles[triangleIndex++] = outerNext;
+            triangles[triangleIndex++] = innerNext;
+
+            triangles[triangleIndex++] = outerNext;
+            triangles[triangleIndex++] = outerCurrent;
+            triangles[triangleIndex++] = innerCurrent;
+            triangles[triangleIndex++] = innerNext;
+            triangles[triangleIndex++] = outerNext;
+            triangles[triangleIndex++] = innerCurrent;
+        }
+
+        Mesh mesh = new Mesh();
+        mesh.name = "Radar Dig Ripple Mesh";
+        mesh.vertices = vertices;
+        mesh.uv = uvs;
+        mesh.triangles = triangles;
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        return mesh;
+    }
+
     private void Update()
     {
         if (markerType != MarkerType.FoundTreasure)
@@ -286,6 +390,36 @@ public class SearchMarker : MonoBehaviour
             Color dimColor = new Color(baseColor.r, baseColor.g, baseColor.b, 0.22f);
             SetRendererColor(markerRenderer, Color.Lerp(dimColor, baseColor, wave));
             transform.localScale = new Vector3(startScale.x * pulse, startScale.y, startScale.z * pulse);
+        }
+
+        UpdateRippleRings();
+    }
+
+    private void UpdateRippleRings()
+    {
+        float time = Time.time + animationSeed;
+
+        for (int i = 0; i < rippleRings.Length; i++)
+        {
+            RippleRing ring = rippleRings[i];
+
+            if (ring == null || ring.transform == null)
+            {
+                continue;
+            }
+
+            float phase = Mathf.Repeat(time / FoundRippleCycleDuration + ring.offset, 1f);
+            float eased = 1f - Mathf.Pow(1f - phase, 2.35f);
+            float radius = Mathf.Lerp(FoundRippleMinRadius, FoundRippleMaxRadius, eased);
+            float alpha = Mathf.Sin(phase * Mathf.PI) * Mathf.Lerp(0.32f, 0.03f, phase);
+
+            ring.transform.localPosition = Vector3.up * (FoundRippleHeight + i * 0.0015f);
+            ring.transform.localScale = new Vector3(radius, 1f, radius);
+
+            if (ring.renderer != null)
+            {
+                SetRendererColor(ring.renderer, new Color(baseColor.r, baseColor.g, baseColor.b, alpha));
+            }
         }
     }
 

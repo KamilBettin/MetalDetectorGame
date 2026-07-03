@@ -326,6 +326,11 @@ public class DigSiteVisual : MonoBehaviour
         chestRoot = chestObject.transform;
         chestRoot.SetParent(transform, false);
         chestRoot.localRotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
+        if (usingPrefabChest)
+        {
+            ApplyChestMaterials(chestObject);
+        }
+
         NormalizeChestScale(chestObject, new Vector3(0.68f, 0.42f, 0.48f));
         chestBaseScale = chestRoot.localScale;
         DisableCollidersInChildren(chestObject);
@@ -806,10 +811,15 @@ public class DigSiteVisual : MonoBehaviour
 
     private static Material CreateTransparentMaterial(Color color)
     {
-        Shader shader = GetLitShader();
+        Shader shader = GetTransparentShader();
 
         Material material = new Material(shader);
         SetMaterialColor(material, color);
+
+        if (material.HasProperty("_Mode"))
+        {
+            material.SetFloat("_Mode", 3f);
+        }
 
         if (material.HasProperty("_Surface"))
         {
@@ -830,6 +840,9 @@ public class DigSiteVisual : MonoBehaviour
         material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
         material.SetInt("_ZWrite", 0);
         material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        material.EnableKeyword("_ALPHABLEND_ON");
+        material.DisableKeyword("_ALPHATEST_ON");
+        material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
         material.renderQueue = 3000;
         return material;
     }
@@ -1129,9 +1142,39 @@ public class DigSiteVisual : MonoBehaviour
             }
         }
 
-        return Shader.Find("HDRP/Lit")
+        return Shader.Find("Standard")
             ?? Shader.Find("Universal Render Pipeline/Lit")
-            ?? Shader.Find("Standard");
+            ?? Shader.Find("HDRP/Lit")
+            ?? Shader.Find("Unlit/Color");
+    }
+
+    private static Shader GetTransparentShader()
+    {
+        string pipelineName = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null
+            ? UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline.GetType().FullName
+            : "";
+
+        if (pipelineName.Contains("HighDefinition"))
+        {
+            return Shader.Find("HDRP/Unlit")
+                ?? Shader.Find("HDRP/Lit")
+                ?? Shader.Find("Standard")
+                ?? Shader.Find("Unlit/Color");
+        }
+
+        if (pipelineName.Contains("Universal"))
+        {
+            return Shader.Find("Universal Render Pipeline/Unlit")
+                ?? Shader.Find("Universal Render Pipeline/Lit")
+                ?? Shader.Find("Standard")
+                ?? Shader.Find("Unlit/Color");
+        }
+
+        return Shader.Find("Unlit/Transparent")
+            ?? Shader.Find("Legacy Shaders/Transparent/Diffuse")
+            ?? Shader.Find("Sprites/Default")
+            ?? Shader.Find("Standard")
+            ?? Shader.Find("Unlit/Color");
     }
 
     private static void SetTexture(Material material, Texture texture, params string[] names)

@@ -592,8 +592,7 @@ public class RuntimeGameUI : MonoBehaviour
             Vector3 promptPosition = digTarget.revealMarker != null
                 ? digTarget.revealMarker.transform.position + Vector3.up * 0.75f
                 : digTarget.transform.position + Vector3.up * 0.75f;
-            Transform highlightTarget = digTarget.revealMarker != null ? digTarget.revealMarker.transform : digTarget.transform;
-            ShowWorldPrompt(actionText, promptPosition, new Color(0.25f, 0.88f, 1f, 0.95f), "treasure", highlightTarget);
+            ShowWorldPrompt(actionText, promptPosition, new Color(0.25f, 0.88f, 1f, 0.95f), "treasure");
             return;
         }
 
@@ -1376,26 +1375,26 @@ public class RuntimeGameUI : MonoBehaviour
 
     private void ApplyFoundToastLayout(RewardTier tier)
     {
-        Vector2 panelSize = new Vector2(520f, 150f);
-        Vector2 panelPosition = new Vector2(0f, -185f);
-        Vector2 iconPosition = new Vector2(24f, -24f);
-        Vector2 iconSize = new Vector2(104f, 104f);
-        Vector2 textStart = new Vector2(150f, -22f);
-        Vector2 textWidth = new Vector2(340f, 30f);
-        int titleSize = 24;
-        int subtitleSize = 18;
-        int valueSize = 16;
+        Vector2 panelSize = new Vector2(580f, 168f);
+        Vector2 panelPosition = new Vector2(0f, -95f);
+        Vector2 iconPosition = new Vector2(26f, -25f);
+        Vector2 iconSize = new Vector2(118f, 118f);
+        Vector2 textStart = new Vector2(166f, -24f);
+        Vector2 textWidth = new Vector2(382f, 34f);
+        int titleSize = 28;
+        int subtitleSize = 20;
+        int valueSize = 18;
 
         if (tier == RewardTier.Trash)
         {
-            panelSize = new Vector2(460f, 126f);
-            iconPosition = new Vector2(22f, -22f);
-            iconSize = new Vector2(82f, 82f);
-            textStart = new Vector2(126f, -18f);
-            textWidth = new Vector2(304f, 28f);
-            titleSize = 21;
-            subtitleSize = 15;
-            valueSize = 14;
+            panelSize = new Vector2(510f, 142f);
+            iconPosition = new Vector2(24f, -23f);
+            iconSize = new Vector2(94f, 94f);
+            textStart = new Vector2(142f, -20f);
+            textWidth = new Vector2(332f, 30f);
+            titleSize = 23;
+            subtitleSize = 17;
+            valueSize = 15;
         }
         else if (!foundToastIsReward)
         {
@@ -1411,25 +1410,25 @@ public class RuntimeGameUI : MonoBehaviour
         }
         else if (tier == RewardTier.Valuable)
         {
-            panelSize = new Vector2(610f, 178f);
-            iconPosition = new Vector2(26f, -24f);
-            iconSize = new Vector2(126f, 126f);
-            textStart = new Vector2(176f, -24f);
-            textWidth = new Vector2(404f, 34f);
-            titleSize = 30;
-            subtitleSize = 20;
-            valueSize = 18;
+            panelSize = new Vector2(680f, 198f);
+            iconPosition = new Vector2(28f, -26f);
+            iconSize = new Vector2(142f, 142f);
+            textStart = new Vector2(196f, -26f);
+            textWidth = new Vector2(448f, 38f);
+            titleSize = 34;
+            subtitleSize = 23;
+            valueSize = 20;
         }
         else if (tier == RewardTier.Jackpot)
         {
-            panelSize = new Vector2(700f, 208f);
-            iconPosition = new Vector2(30f, -28f);
-            iconSize = new Vector2(150f, 150f);
-            textStart = new Vector2(208f, -26f);
-            textWidth = new Vector2(456f, 42f);
-            titleSize = 38;
-            subtitleSize = 24;
-            valueSize = 22;
+            panelSize = new Vector2(780f, 232f);
+            iconPosition = new Vector2(32f, -30f);
+            iconSize = new Vector2(170f, 170f);
+            textStart = new Vector2(236f, -28f);
+            textWidth = new Vector2(506f, 46f);
+            titleSize = 43;
+            subtitleSize = 27;
+            valueSize = 24;
         }
 
         foundToastPanel.anchoredPosition = panelPosition;
