@@ -58,10 +58,15 @@ The game is currently in active development. The main gameplay loop is playable,
 - TextMeshPro
 - UMA avatar system
 - Steam-ready multiplayer groundwork
+- Built with help from OpenAI Codex
 
 ## Portfolio Summary
 
 Developed a first-person Unity treasure-hunting game featuring detector-based exploration, procedural loot spawning, digging and chest interactions, inventory and economy systems, gear upgrades, quests, localization, save/load support, and early co-op synchronization.
+
+## Credits
+
+Created by Kamil with development assistance from OpenAI Codex.
 
 ## License
 
