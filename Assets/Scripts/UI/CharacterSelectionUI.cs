@@ -8,6 +8,9 @@ public class CharacterSelectionUI : MonoBehaviour
     private RectTransform root;
     private Text titleText;
     private Text hintText;
+    private Text maleGenderText;
+    private Text femaleGenderText;
+    private Text closeButtonText;
     private Button maleGenderButton;
     private Button femaleGenderButton;
     private Image maleGenderImage;
@@ -27,6 +30,7 @@ public class CharacterSelectionUI : MonoBehaviour
 
         Instance = this;
         BuildCanvas();
+        GameLocalization.LanguageChanged += RefreshSelection;
         SetOpen(false);
     }
 
@@ -36,6 +40,8 @@ public class CharacterSelectionUI : MonoBehaviour
         {
             Instance = null;
         }
+
+        GameLocalization.LanguageChanged -= RefreshSelection;
     }
 
     private void Update()
@@ -97,8 +103,11 @@ public class CharacterSelectionUI : MonoBehaviour
         femaleGenderButton = CreateButton("FEMALE", panel, new Vector2(145f, -178f), new Vector2(240f, 72f), () => SelectGender(PlayerCharacterSelection.CharacterGender.Female));
         maleGenderImage = maleGenderButton.targetGraphic as Image;
         femaleGenderImage = femaleGenderButton.targetGraphic as Image;
+        maleGenderText = maleGenderButton.GetComponentInChildren<Text>();
+        femaleGenderText = femaleGenderButton.GetComponentInChildren<Text>();
 
-        CreateButton("CLOSE", panel, new Vector2(0f, -290f), new Vector2(220f, 52f), () => SetOpen(false));
+        Button closeButton = CreateButton("CLOSE", panel, new Vector2(0f, -290f), new Vector2(220f, 52f), () => SetOpen(false));
+        closeButtonText = closeButton.GetComponentInChildren<Text>();
     }
 
     private void SelectGender(PlayerCharacterSelection.CharacterGender gender)
@@ -141,8 +150,30 @@ public class CharacterSelectionUI : MonoBehaviour
                 : new Color(0.36f, 0.28f, 0.18f, 0.96f);
         }
 
-        titleText.text = "RANDOM " + PlayerCharacterSelection.GetGenderLabel(selectedGender).ToUpperInvariant();
-        hintText.text = "New games generate a fresh random avatar";
+        titleText.text = GameLocalization.TFormat("character.title", GetLocalizedGenderLabel(selectedGender).ToUpperInvariant());
+        hintText.text = GameLocalization.T("character.hint");
+
+        if (maleGenderText != null)
+        {
+            maleGenderText.text = GameLocalization.T("character.male");
+        }
+
+        if (femaleGenderText != null)
+        {
+            femaleGenderText.text = GameLocalization.T("character.female");
+        }
+
+        if (closeButtonText != null)
+        {
+            closeButtonText.text = GameLocalization.T("settings.close").ToUpperInvariant();
+        }
+    }
+
+    private static string GetLocalizedGenderLabel(PlayerCharacterSelection.CharacterGender gender)
+    {
+        return gender == PlayerCharacterSelection.CharacterGender.Female
+            ? GameLocalization.T("character.female")
+            : GameLocalization.T("character.male");
     }
 
     private void RefreshNetworkCharacter()

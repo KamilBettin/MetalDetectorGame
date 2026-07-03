@@ -7980,7 +7980,7 @@ MonoBehaviour:
   treasureMap: {fileID: 0}
   rustyShovelPrefab: {fileID: 1000011881196238, guid: beb87db6153f69442821a348e08035ab, type: 3}
   upgradedShovelPrefab: {fileID: 2040672677219441416, guid: a446d08b479f3384887baf06c00d2764, type: 3}
-  buriedChestPrefab: {fileID: 0}
+  buriedChestPrefab: {fileID: 1000014188511100, guid: 5dcae5adf53292945adef517afe8041e, type: 3}
   dugSandMaterial: {fileID: 0}
   dugSoilMaterial: {fileID: 0}
   rustyShovelLocalPosition: {x: 0, y: 0.12, z: 0}

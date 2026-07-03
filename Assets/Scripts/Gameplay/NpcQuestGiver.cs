@@ -183,13 +183,13 @@ public class NpcQuestGiver : MonoBehaviour
 
         if (quest.completed)
         {
-            ShowMessage("This job is already done.");
+            ShowMessage(GameLocalization.T("quest.already_done"));
             return;
         }
 
         if (playerInventory == null)
         {
-            ShowMessage("No backpack found.");
+            ShowMessage(GameLocalization.T("quest.no_backpack"));
             return;
         }
 
@@ -197,19 +197,19 @@ public class NpcQuestGiver : MonoBehaviour
 
         if (ownedCount < quest.requiredCount)
         {
-            ShowMessage("You need " + quest.requiredCount + "x " + quest.requiredItemName + ".");
+            ShowMessage(GameLocalization.TFormat("quest.need_items", quest.requiredCount, quest.requiredItemName));
             return;
         }
 
         if (!playerInventory.RemoveItemsNamed(quest.AllAcceptedItemNames, quest.requiredCount))
         {
-            ShowMessage("Those items are no longer in your backpack.");
+            ShowMessage(GameLocalization.T("quest.items_missing"));
             return;
         }
 
         quest.completed = true;
         playerInventory.money += Mathf.Max(0, quest.rewardMoney);
-        ShowMessage("Quest complete. Paid $" + quest.rewardMoney + ".");
+        ShowMessage(GameLocalization.TFormat("quest.complete_paid", quest.rewardMoney));
         GameEvents.ReportTreasuresSold(quest.requiredCount);
         LocalCoopManager.Instance?.ReportTeamStateChanged();
     }
@@ -273,7 +273,7 @@ public class NpcQuestGiver : MonoBehaviour
 
         if (IsPlayerInRange() && !GameUIState.AnyMenuOpen)
         {
-            GameGui.DrawToast(new Rect(Screen.width * 0.5f - 175f, Screen.height - 178f, 350f, 40f), "E - Talk to " + npcDisplayName);
+            GameGui.DrawToast(new Rect(Screen.width * 0.5f - 175f, Screen.height - 178f, 350f, 40f), GameLocalization.TFormat("quest.talk_to", npcDisplayName));
         }
     }
 
@@ -283,9 +283,9 @@ public class NpcQuestGiver : MonoBehaviour
         ResolveReferences();
 
         Rect panel = new Rect(Screen.width * 0.5f - 280f, Screen.height * 0.5f - 238f, 560f, 476f);
-        GameGui.DrawPanel(panel, npcDisplayName + " - Jobs");
+        GameGui.DrawPanel(panel, npcDisplayName + " - " + GameLocalization.T("quest.jobs"));
 
-        GUI.Label(new Rect(panel.x + 20f, panel.y + 44f, panel.width - 40f, 24f), "Bring requested finds from your backpack for cash.", GameGui.LabelStyle);
+        GUI.Label(new Rect(panel.x + 20f, panel.y + 44f, panel.width - 40f, 24f), GameLocalization.T("quest.help"), GameGui.LabelStyle);
 
         float rowY = panel.y + 82f;
 
@@ -295,7 +295,7 @@ public class NpcQuestGiver : MonoBehaviour
             rowY += 84f;
         }
 
-        GUI.Label(new Rect(panel.x + 18f, panel.y + panel.height - 34f, panel.width - 36f, 22f), messageTimer > 0f ? message : "ESC - Close", GameGui.HintStyle);
+        GUI.Label(new Rect(panel.x + 18f, panel.y + panel.height - 34f, panel.width - 36f, 22f), messageTimer > 0f ? message : GameLocalization.T("quest.close"), GameGui.HintStyle);
     }
 
     private void DrawQuestRow(QuestDefinition quest, Rect rect)
@@ -318,10 +318,10 @@ public class NpcQuestGiver : MonoBehaviour
         float textWidth = rect.width - 210f;
         GUI.Label(new Rect(textX, rect.y + 6f, textWidth, 22f), quest.title, GameGui.LabelStyle);
         GUI.Label(new Rect(textX, rect.y + 29f, textWidth, 18f), quest.flavorText, GameGui.SmallLabelStyle);
-        GUI.Label(new Rect(textX, rect.y + 52f, textWidth, 18f), "Need: " + quest.requiredCount + "x " + quest.requiredItemName + " (" + ownedCount + "/" + quest.requiredCount + ")  Reward: $" + quest.rewardMoney, GameGui.SmallLabelStyle);
+        GUI.Label(new Rect(textX, rect.y + 52f, textWidth, 18f), GameLocalization.TFormat("quest.need_reward", quest.requiredCount, quest.requiredItemName, ownedCount, quest.rewardMoney), GameGui.SmallLabelStyle);
 
         GUI.enabled = canComplete;
-        string buttonText = quest.completed ? "Done" : canComplete ? "Deliver" : "Missing";
+        string buttonText = quest.completed ? GameLocalization.T("quest.done") : canComplete ? GameLocalization.T("quest.deliver") : GameLocalization.T("quest.missing");
 
         if (GameGui.Button(new Rect(rect.xMax - 112f, rect.y + 22f, 92f, 34f), buttonText))
         {

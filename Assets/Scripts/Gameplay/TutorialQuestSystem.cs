@@ -14,20 +14,20 @@ public class TutorialQuestSystem : MonoBehaviour
         {
             if (scannedCells < scannedCellsGoal)
             {
-                return "Scan sand: " + scannedCells + "/" + scannedCellsGoal;
+                return GameLocalization.TFormat("tutorial.scan_sand", scannedCells, scannedCellsGoal);
             }
 
             if (!foundFirstTreasure)
             {
-                return "Find and dig up your first treasure";
+                return GameLocalization.T("tutorial.find_first");
             }
 
             if (!soldFirstLoot)
             {
-                return "Sell your loot to the trader";
+                return GameLocalization.T("tutorial.sell_loot");
             }
 
-            return "Tutorial complete. Keep searching and upgrading.";
+            return GameLocalization.T("tutorial.complete");
         }
     }
 

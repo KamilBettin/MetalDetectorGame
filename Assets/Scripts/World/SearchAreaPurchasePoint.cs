@@ -12,7 +12,7 @@ public class SearchAreaPurchasePoint : MonoBehaviour
     private string message = "";
     private float messageTimer;
     public Vector3 PromptPosition => transform.position + promptWorldOffset;
-    public string PromptActionText => targetArea != null && targetArea.unlockCost <= 0 ? "Claim Area" : "Buy Area";
+    public string PromptActionText => targetArea != null && targetArea.unlockCost <= 0 ? GameLocalization.T("area.claim_area") : GameLocalization.T("area.buy_area");
 
     private void Awake()
     {
@@ -51,7 +51,7 @@ public class SearchAreaPurchasePoint : MonoBehaviour
     {
         if (targetArea == null)
         {
-            ShowMessage("This sign is not connected to a search area.");
+            ShowMessage(GameLocalization.T("area.sign_not_connected"));
             return;
         }
 
@@ -135,8 +135,8 @@ public class SearchAreaPurchasePoint : MonoBehaviour
 
         if (IsPlayerInRange() && !GameUIState.AnyMenuOpen)
         {
-            string action = targetArea.unlockCost <= 0 ? "Claim" : "Buy";
-            string price = targetArea.unlockCost <= 0 ? "Free" : "$" + targetArea.unlockCost;
+            string action = targetArea.unlockCost <= 0 ? GameLocalization.T("area.claim") : GameLocalization.T("area.buy");
+            string price = targetArea.unlockCost <= 0 ? GameLocalization.T("area.free") : "$" + targetArea.unlockCost;
             string prompt = "E - " + action + " " + targetArea.areaName + " (" + price + ")";
             GameGui.DrawToast(new Rect(Screen.width * 0.5f - 190f, Screen.height - 178f, 380f, 40f), prompt);
         }

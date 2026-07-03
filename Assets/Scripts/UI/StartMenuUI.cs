@@ -233,8 +233,7 @@ public class StartMenuUI : MonoBehaviour
                 ShowMultiplayerPanel();
                 break;
             case 3:
-                CharacterSelectionUI.Open();
-                ShowMessage("Choose your co-op character.");
+                SettingsMenuUI.Open();
                 break;
             case 4:
                 QuitGame();

@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -7,7 +8,6 @@ public class DiggingController : MonoBehaviour
     public float digCooldownPadding = 0.05f;
     public PlayerInventory playerInventory;
     public UpgradeShop upgradeShop;
-    public TreasureMap treasureMap;
     public GameObject rustyShovelPrefab;
     public GameObject upgradedShovelPrefab;
     public GameObject buriedChestPrefab;
@@ -30,6 +30,7 @@ public class DiggingController : MonoBehaviour
     private int lastDigCurrentHits;
     private int lastDigRequiredHits;
     private float nextDigAllowedTime;
+    private bool chestSearchInProgress;
 
     public string LastFoundMessage => lastFoundMessage;
     public float MessageTimer => messageTimer;
@@ -54,20 +55,17 @@ public class DiggingController : MonoBehaviour
         }
 
         upgradeShop = FindBestShop();
-        treasureMap = GetComponent<TreasureMap>();
-
-        if (treasureMap == null)
-        {
-            treasureMap = gameObject.AddComponent<TreasureMap>();
-        }
-
-        treasureMap.player = transform;
     }
 
     private void Update()
     {
         if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame)
         {
+            if (chestSearchInProgress)
+            {
+                return;
+            }
+
             if (GameUIState.AnyMenuOpen || (upgradeShop != null && upgradeShop.IsPlayerNearShop()) || PlayerHome.AnyHomeInteractionInRange() || NpcQuestGiver.AnyQuestGiverInteractionInRange())
             {
                 return;
@@ -108,7 +106,6 @@ public class DiggingController : MonoBehaviour
 
         if (treasure == null)
         {
-            treasureMap.RegisterCheckedSpot(transform.position);
             lastFoundMessage = "No marked target here. Scan with LMB first.";
             lastFoundIcon = null;
             lastFoundWasTreasure = false;
@@ -142,6 +139,11 @@ public class DiggingController : MonoBehaviour
 
     private bool TrySearchReadyChest()
     {
+        if (chestSearchInProgress)
+        {
+            return true;
+        }
+
         if (IsDigCooldownActive())
         {
             return false;
@@ -154,26 +156,49 @@ public class DiggingController : MonoBehaviour
             return false;
         }
 
-        SearchChest(treasure);
+        if (playerInventory == null || !playerInventory.HasFreeSpace(1, 1))
+        {
+            ShowBackpackFullMessage();
+            return true;
+        }
+
+        DigSiteVisual digSite = DigSiteVisual.FindForTreasure(treasure);
+        StartCoroutine(SearchChestRoutine(treasure, digSite));
         return true;
+    }
+
+    private IEnumerator SearchChestRoutine(DetectableTreasure treasure, DigSiteVisual digSite)
+    {
+        chestSearchInProgress = true;
+        ClearDigProgress();
+        lastFoundMessage = "Searching chest...";
+        lastFoundIcon = null;
+        lastFoundWasTreasure = false;
+        lastFoundItemName = "";
+        lastFoundValue = 0;
+        messageTimer = 1.5f;
+
+        float duration = digSite != null ? digSite.PlaySearchAnimation() : 0.85f;
+        nextDigAllowedTime = Time.time + duration + digCooldownPadding;
+        yield return new WaitForSeconds(duration);
+
+        if (treasure != null && !treasure.isFound)
+        {
+            SearchChest(treasure);
+        }
+
+        chestSearchInProgress = false;
     }
 
     private void SearchChest(DetectableTreasure treasure)
     {
         if (!playerInventory.AddTreasure(treasure))
         {
-            lastFoundMessage = "Backpack is full. Make room, then search the chest.";
-            lastFoundIcon = null;
-            lastFoundWasTreasure = false;
-            lastFoundItemName = "";
-            lastFoundValue = 0;
-            ClearDigProgress();
-            messageTimer = 3f;
+            ShowBackpackFullMessage();
             return;
         }
 
         treasure.isFound = true;
-        treasureMap.RegisterFoundTreasure(treasure.transform.position);
 
         DigSiteVisual digSite = DigSiteVisual.FindForTreasure(treasure);
 
@@ -329,7 +354,24 @@ public class DiggingController : MonoBehaviour
 
     private bool IsSearchableChest(DetectableTreasure treasure)
     {
-        return treasure != null && treasure.isRevealed && !treasure.isFound && treasure.IsDugUp;
+        if (treasure == null || !treasure.isRevealed || treasure.isFound || !treasure.IsDugUp)
+        {
+            return false;
+        }
+
+        DigSiteVisual digSite = DigSiteVisual.FindForTreasure(treasure);
+        return digSite == null || !digSite.IsSearchAnimationPlaying;
+    }
+
+    private void ShowBackpackFullMessage()
+    {
+        lastFoundMessage = "Backpack is full. Make room, then search the chest.";
+        lastFoundIcon = null;
+        lastFoundWasTreasure = false;
+        lastFoundItemName = "";
+        lastFoundValue = 0;
+        ClearDigProgress();
+        messageTimer = 3f;
     }
 
     private DigSiteVisual UpdateDigSite(DetectableTreasure treasure)

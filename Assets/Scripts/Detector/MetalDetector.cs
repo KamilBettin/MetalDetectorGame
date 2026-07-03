@@ -360,7 +360,7 @@ public class MetalDetector : MonoBehaviour
             signalColor,
             "Signal " + Mathf.RoundToInt(currentSignal * 100f) + "%"
         );
-        GUI.Label(new Rect(36, 104, 248, 18), "LMB scan | E dig | TAB backpack | M map", GameGui.SmallLabelStyle);
+        GUI.Label(new Rect(36, 104, 248, 18), "LMB scan | E dig | TAB backpack", GameGui.SmallLabelStyle);
 
         if (nearestTreasure != null && RevealSignalActive)
         {

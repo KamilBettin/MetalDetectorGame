@@ -26,11 +26,11 @@ public class RuntimeGameUI : MonoBehaviour
     private DetectorBattery detectorBattery;
     private PlayerInventory inventory;
     private UpgradeShop shop;
-    private TreasureMap treasureMap;
     private TutorialQuestSystem questSystem;
     private DiggingController diggingController;
     private InteractionTargetHighlight interactionHighlight;
 
+    private Text detectorTitleText;
     private Text signalText;
     private Image signalFill;
     private Text batteryText;
@@ -38,6 +38,7 @@ public class RuntimeGameUI : MonoBehaviour
     private Text moneyText;
     private Text cargoText;
     private Image cargoFill;
+    private Text questTitleText;
     private Text questText;
     private Image questFill;
     private Text hintText;
@@ -68,7 +69,6 @@ public class RuntimeGameUI : MonoBehaviour
     private float worldPromptBobTimer;
     private Text inventoryTitleText;
     private Text shopMessageText;
-    private Text mapTitleText;
 
     private RectTransform inventoryPanel;
     private RectTransform inventoryGrid;
@@ -77,16 +77,15 @@ public class RuntimeGameUI : MonoBehaviour
     private RectTransform shopDropZone;
     private RectTransform sellTabButton;
     private RectTransform upgradeTabButton;
+    private Text sellTabText;
+    private Text upgradeTabText;
     private Text shopTitleText;
     private Text shopDropText;
     private Image shopDropImage;
     private RectTransform shopDragGhost;
-    private RectTransform mapPanel;
-    private RectTransform mapContent;
 
     private readonly List<GameObject> inventoryCells = new List<GameObject>();
     private readonly List<GameObject> shopContentObjects = new List<GameObject>();
-    private readonly List<GameObject> mapDots = new List<GameObject>();
     private readonly Dictionary<string, Sprite> iconSprites = new Dictionary<string, Sprite>();
     private ShopTab activeShopTab = ShopTab.Sell;
     private ShopDragItem activeShopDragItem;
@@ -102,10 +101,12 @@ public class RuntimeGameUI : MonoBehaviour
         FindReferences();
         BuildCanvas();
         interactionHighlight = gameObject.AddComponent<InteractionTargetHighlight>();
+        GameLocalization.LanguageChanged += HandleLanguageChanged;
     }
 
     private void OnDestroy()
     {
+        GameLocalization.LanguageChanged -= HandleLanguageChanged;
         IsActive = false;
     }
 
@@ -151,11 +152,6 @@ public class RuntimeGameUI : MonoBehaviour
         {
             shop = bestShop;
             shopDirty = true;
-        }
-
-        if (treasureMap == null)
-        {
-            treasureMap = FindAnyObjectByType<TreasureMap>();
         }
 
         if (questSystem == null)
@@ -226,31 +222,30 @@ public class RuntimeGameUI : MonoBehaviour
         BuildHud();
         BuildInventory();
         BuildShop();
-        BuildMap();
     }
 
     private void BuildHud()
     {
         RectTransform detectorPanel = CreatePanel("Detector Panel", new Vector2(20f, -20f), new Vector2(340f, 150f), new Vector2(0f, 1f), canvas.transform);
         CreateIconBadge(detectorPanel, new Vector2(14f, -12f), new Vector2(42f, 34f), "detector", new Color(0.18f, 0.72f, 1f, 1f));
-        CreateText("Detector", detectorPanel, new Vector2(66f, -12f), new Vector2(250f, 24f), 22, FontStyle.Bold, TextAnchor.MiddleLeft);
-        signalText = CreateText("Signal 0%", detectorPanel, new Vector2(16f, -48f), new Vector2(300f, 22f), 16, FontStyle.Normal, TextAnchor.MiddleLeft);
+        detectorTitleText = CreateText(GameLocalization.T("hud.detector"), detectorPanel, new Vector2(66f, -12f), new Vector2(250f, 24f), 22, FontStyle.Bold, TextAnchor.MiddleLeft);
+        signalText = CreateText(GameLocalization.T("hud.signal") + " 0%", detectorPanel, new Vector2(16f, -48f), new Vector2(300f, 22f), 16, FontStyle.Normal, TextAnchor.MiddleLeft);
         signalFill = CreateBar(detectorPanel, new Vector2(16f, -78f), new Vector2(300f, 18f), new Color(1f, 0.76f, 0.2f, 1f));
-        batteryText = CreateText("Battery 100%", detectorPanel, new Vector2(16f, -104f), new Vector2(300f, 22f), 14, FontStyle.Normal, TextAnchor.MiddleLeft);
+        batteryText = CreateText(GameLocalization.T("hud.battery") + " 100%", detectorPanel, new Vector2(16f, -104f), new Vector2(300f, 22f), 14, FontStyle.Normal, TextAnchor.MiddleLeft);
         batteryFill = CreateBar(detectorPanel, new Vector2(16f, -130f), new Vector2(300f, 12f), new Color(0.35f, 0.92f, 0.62f, 1f));
 
         RectTransform statusPanel = CreatePanel("Status Panel", new Vector2(-20f, -20f), new Vector2(270f, 104f), new Vector2(1f, 1f), canvas.transform);
-        moneyText = CreateText("$0 cash", statusPanel, new Vector2(14f, -12f), new Vector2(238f, 24f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
-        cargoText = CreateText("Cargo $0", statusPanel, new Vector2(14f, -42f), new Vector2(238f, 20f), 14, FontStyle.Normal, TextAnchor.MiddleLeft);
+        moneyText = CreateText("$0 " + GameLocalization.T("hud.cash"), statusPanel, new Vector2(14f, -12f), new Vector2(238f, 24f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
+        cargoText = CreateText(GameLocalization.T("hud.cargo") + " $0", statusPanel, new Vector2(14f, -42f), new Vector2(238f, 20f), 14, FontStyle.Normal, TextAnchor.MiddleLeft);
         cargoFill = CreateBar(statusPanel, new Vector2(14f, -72f), new Vector2(238f, 14f), new Color(1f, 0.76f, 0.2f, 1f));
 
         RectTransform questPanel = CreatePanel("Quest Panel", new Vector2(20f, -190f), new Vector2(380f, 92f), new Vector2(0f, 1f), canvas.transform);
         CreateIconBadge(questPanel, new Vector2(14f, -12f), new Vector2(42f, 36f), "quest", new Color(0.35f, 0.92f, 0.62f, 1f));
-        CreateText("Tutorial", questPanel, new Vector2(66f, -10f), new Vector2(292f, 22f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
+        questTitleText = CreateText(GameLocalization.T("hud.tutorial"), questPanel, new Vector2(66f, -10f), new Vector2(292f, 22f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
         questText = CreateText("", questPanel, new Vector2(66f, -38f), new Vector2(292f, 20f), 14, FontStyle.Normal, TextAnchor.MiddleLeft);
         questFill = CreateBar(questPanel, new Vector2(66f, -66f), new Vector2(292f, 12f), new Color(0.18f, 0.72f, 1f, 1f));
 
-        hintText = CreateText("Hold LMB scan | E dig/talk | TAB backpack | M map", canvas.transform as RectTransform, new Vector2(0f, 34f), new Vector2(620f, 38f), 18, FontStyle.Bold, TextAnchor.MiddleCenter);
+        hintText = CreateText(GameLocalization.T("hud.hint_start"), canvas.transform as RectTransform, new Vector2(0f, 34f), new Vector2(760f, 38f), 18, FontStyle.Bold, TextAnchor.MiddleCenter);
         hintText.rectTransform.anchorMin = new Vector2(0.5f, 0f);
         hintText.rectTransform.anchorMax = new Vector2(0.5f, 0f);
         hintText.rectTransform.pivot = new Vector2(0.5f, 0f);
@@ -279,14 +274,14 @@ public class RuntimeGameUI : MonoBehaviour
         worldPromptKeyText = CreateText("E", keyBox, Vector2.zero, new Vector2(44f, 38f), 24, FontStyle.Bold, TextAnchor.MiddleCenter);
         worldPromptKeyText.color = new Color(0.06f, 0.045f, 0.02f, 1f);
         worldPromptIcon = CreateSpriteIcon(worldPromptPanel, new Vector2(64f, -12f), new Vector2(30f, 30f), GetIconSprite("quest"), true);
-        worldPromptActionText = CreateText("Use", worldPromptPanel, new Vector2(104f, -11f), new Vector2(146f, 32f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
+        worldPromptActionText = CreateText("", worldPromptPanel, new Vector2(104f, -11f), new Vector2(146f, 32f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
         worldPromptPanel.gameObject.SetActive(false);
     }
 
     private void BuildInventory()
     {
         inventoryPanel = CreatePanel("Inventory Panel", new Vector2(-20f, -140f), new Vector2(420f, 520f), new Vector2(1f, 1f), canvas.transform);
-        inventoryTitleText = CreateText("Backpack", inventoryPanel, new Vector2(18f, -14f), new Vector2(360f, 26f), 22, FontStyle.Bold, TextAnchor.MiddleLeft);
+        inventoryTitleText = CreateText(GameLocalization.T("inventory.backpack"), inventoryPanel, new Vector2(18f, -14f), new Vector2(360f, 26f), 22, FontStyle.Bold, TextAnchor.MiddleLeft);
         inventoryGrid = CreatePanel("Inventory Grid", new Vector2(18f, -82f), new Vector2(370f, 390f), new Vector2(0f, 1f), inventoryPanel);
         inventoryGrid.GetComponent<Image>().color = new Color(0f, 0f, 0f, 0f);
         inventoryPanel.gameObject.SetActive(false);
@@ -295,13 +290,15 @@ public class RuntimeGameUI : MonoBehaviour
     private void BuildShop()
     {
         shopPanel = CreatePanel("Trader Panel", Vector2.zero, new Vector2(760f, 520f), new Vector2(0.5f, 0.5f), canvas.transform);
-        shopTitleText = CreateText("Trader", shopPanel, new Vector2(24f, -18f), new Vector2(480f, 34f), 28, FontStyle.Bold, TextAnchor.MiddleLeft);
+        shopTitleText = CreateText(GameLocalization.T("shop.trader"), shopPanel, new Vector2(24f, -18f), new Vector2(480f, 34f), 28, FontStyle.Bold, TextAnchor.MiddleLeft);
         CreateIconBadge(shopPanel, new Vector2(676f, -18f), new Vector2(54f, 34f), "coin", new Color(1f, 0.76f, 0.2f, 1f));
 
         RectTransform tabsPanel = CreatePanel("Trader Tabs", new Vector2(24f, -70f), new Vector2(170f, 374f), new Vector2(0f, 1f), shopPanel);
         tabsPanel.GetComponent<Image>().color = new Color(0.04f, 0.045f, 0.04f, 0.84f);
-        sellTabButton = CreateShopTabButton(tabsPanel, "sell", "Sell Items", new Vector2(12f, -14f), ShopTab.Sell, new Color(0.35f, 0.92f, 0.62f, 1f));
-        upgradeTabButton = CreateShopTabButton(tabsPanel, "upgrade", "Upgrades", new Vector2(12f, -76f), ShopTab.Upgrades, new Color(0.18f, 0.72f, 1f, 1f));
+        sellTabButton = CreateShopTabButton(tabsPanel, "sell", GameLocalization.T("shop.sell_items"), new Vector2(12f, -14f), ShopTab.Sell, new Color(0.35f, 0.92f, 0.62f, 1f));
+        sellTabText = sellTabButton.GetComponentInChildren<Text>();
+        upgradeTabButton = CreateShopTabButton(tabsPanel, "upgrade", GameLocalization.T("shop.upgrades"), new Vector2(12f, -76f), ShopTab.Upgrades, new Color(0.18f, 0.72f, 1f, 1f));
+        upgradeTabText = upgradeTabButton.GetComponentInChildren<Text>();
 
         shopContent = CreatePanel("Trader Content", new Vector2(212f, -70f), new Vector2(524f, 374f), new Vector2(0f, 1f), shopPanel);
         shopContent.GetComponent<Image>().color = new Color(0.03f, 0.035f, 0.03f, 0.78f);
@@ -310,21 +307,48 @@ public class RuntimeGameUI : MonoBehaviour
         shopPanel.gameObject.SetActive(false);
     }
 
-    private void BuildMap()
-    {
-        mapPanel = CreatePanel("Map Panel", new Vector2(20f, -300f), new Vector2(420f, 420f), new Vector2(0f, 1f), canvas.transform);
-        CreateIconBadge(mapPanel, new Vector2(14f, -10f), new Vector2(38f, 32f), "map", new Color(0.18f, 0.72f, 1f, 1f));
-        mapTitleText = CreateText("Search Map", mapPanel, new Vector2(62f, -12f), new Vector2(320f, 24f), 20, FontStyle.Bold, TextAnchor.MiddleLeft);
-        mapContent = CreatePanel("Map Content", new Vector2(18f, -50f), new Vector2(384f, 330f), new Vector2(0f, 1f), mapPanel);
-        mapPanel.gameObject.SetActive(false);
-    }
-
     private void Refresh()
     {
+        RefreshLocalizedLabels();
         RefreshHud();
         RefreshInventory();
         RefreshShop();
-        RefreshMap();
+    }
+
+    private void HandleLanguageChanged()
+    {
+        shopDirty = true;
+        lastShopItemCount = -1;
+        lastShopMoney = -1;
+        Refresh();
+    }
+
+    private void RefreshLocalizedLabels()
+    {
+        if (detectorTitleText != null)
+        {
+            detectorTitleText.text = GameLocalization.T("hud.detector");
+        }
+
+        if (questTitleText != null)
+        {
+            questTitleText.text = GameLocalization.T("hud.tutorial");
+        }
+
+        if (inventoryTitleText != null)
+        {
+            inventoryTitleText.text = GameLocalization.T("inventory.backpack");
+        }
+
+        if (sellTabText != null)
+        {
+            sellTabText.text = GameLocalization.T("shop.sell_items");
+        }
+
+        if (upgradeTabText != null)
+        {
+            upgradeTabText.text = GameLocalization.T("shop.upgrades");
+        }
     }
 
     private void RefreshHud()
@@ -333,26 +357,26 @@ public class RuntimeGameUI : MonoBehaviour
         if (metalDetector != null && metalDetector.NearestTreasure != null)
         {
             string signalState = metalDetector.RevealSignalActive
-                ? "target marked"
-                : metalDetector.CurrentSignalCellDistance <= 0 ? "scan now" : metalDetector.CurrentSignalDistanceMeters.ToString("0.0") + "m";
-            signalText.text = "Signal " + Mathf.RoundToInt(signal * 100f) + "% | " + signalState;
+                ? GameLocalization.T("hud.signal_marked")
+                : metalDetector.CurrentSignalCellDistance <= 0 ? GameLocalization.T("hud.signal_scan_now") : metalDetector.CurrentSignalDistanceMeters.ToString("0.0") + "m";
+            signalText.text = GameLocalization.T("hud.signal") + " " + Mathf.RoundToInt(signal * 100f) + "% | " + signalState;
         }
         else
         {
-            signalText.text = "Signal 0% | " + (metalDetector != null ? metalDetector.CurrentDetectorName + " " + metalDetector.CurrentScanCells + "x" + metalDetector.CurrentScanCells : "No detector");
+            signalText.text = GameLocalization.T("hud.signal") + " 0% | " + (metalDetector != null ? metalDetector.CurrentDetectorName + " " + metalDetector.CurrentScanCells + "x" + metalDetector.CurrentScanCells : GameLocalization.T("hud.no_detector"));
         }
 
         signalFill.fillAmount = signal;
 
         float battery = detectorBattery != null ? detectorBattery.Charge01 : 1f;
-        batteryText.text = "Battery " + Mathf.RoundToInt(battery * 100f) + "%";
+        batteryText.text = GameLocalization.T("hud.battery") + " " + Mathf.RoundToInt(battery * 100f) + "%";
         batteryFill.fillAmount = battery;
         batteryFill.color = battery < 0.2f ? new Color(1f, 0.35f, 0.28f, 1f) : new Color(0.35f, 0.92f, 0.62f, 1f);
 
         if (inventory != null)
         {
-            moneyText.text = "$" + inventory.money + " cash";
-            cargoText.text = "Cargo $" + inventory.GetInventoryValue() + " | " + inventory.OccupiedSlots + "/" + inventory.Capacity;
+            moneyText.text = "$" + inventory.money + " " + GameLocalization.T("hud.cash");
+            cargoText.text = GameLocalization.T("hud.cargo") + " $" + inventory.GetInventoryValue() + " | " + inventory.OccupiedSlots + "/" + inventory.Capacity;
             cargoFill.fillAmount = inventory.OccupiedSlots / (float)inventory.Capacity;
         }
 
@@ -475,28 +499,28 @@ public class RuntimeGameUI : MonoBehaviour
     {
         if (GameUIState.IsTraderMenuOpen)
         {
-            hintText.text = "ESC - Close trader";
+            hintText.text = GameLocalization.T("hud.hint_close_trader");
             HideWorldPrompt();
             return;
         }
 
         if (GameUIState.IsQuestMenuOpen)
         {
-            hintText.text = "ESC - Close jobs";
+            hintText.text = GameLocalization.T("hud.hint_close_jobs");
             HideWorldPrompt();
             return;
         }
 
         if (GameUIState.IsInventoryOpen)
         {
-            hintText.text = "TAB / ESC - Close backpack";
+            hintText.text = GameLocalization.T("hud.hint_close_backpack");
             HideWorldPrompt();
             return;
         }
 
         if (GameUIState.IsHomeMenuOpen)
         {
-            hintText.text = "ESC - Close home";
+            hintText.text = GameLocalization.T("hud.hint_close_home");
             HideWorldPrompt();
             return;
         }
@@ -505,8 +529,8 @@ public class RuntimeGameUI : MonoBehaviour
 
         if (questGiver != null)
         {
-            hintText.text = "E - Talk / Jobs";
-            ShowWorldPrompt("Jobs", questGiver.PromptPosition, new Color(0.35f, 0.92f, 0.62f, 0.95f), "quest", questGiver.transform);
+            hintText.text = GameLocalization.T("hud.hint_talk_jobs");
+            ShowWorldPrompt(GameLocalization.T("hud.action_jobs"), questGiver.PromptPosition, new Color(0.35f, 0.92f, 0.62f, 0.95f), "quest", questGiver.transform);
             return;
         }
 
@@ -514,8 +538,8 @@ public class RuntimeGameUI : MonoBehaviour
 
         if (home != null)
         {
-            hintText.text = "E - Use home";
-            ShowWorldPrompt("Use Home", home.PromptPosition, new Color(0.35f, 0.92f, 0.62f, 0.95f), "bag", home.transform);
+            hintText.text = GameLocalization.T("hud.hint_use_home");
+            ShowWorldPrompt(GameLocalization.T("hud.action_use_home"), home.PromptPosition, new Color(0.35f, 0.92f, 0.62f, 0.95f), "bag", home.transform);
             return;
         }
 
@@ -530,7 +554,7 @@ public class RuntimeGameUI : MonoBehaviour
 
         if (DayNightCycle.IsNightNow)
         {
-            hintText.text = "Night - searching disabled. Sleep at home.";
+            hintText.text = GameLocalization.T("hud.hint_night");
             HideWorldPrompt();
             return;
         }
@@ -540,7 +564,9 @@ public class RuntimeGameUI : MonoBehaviour
         if (promptShop != null && promptShop.IsPlayerNearShop())
         {
             shop = promptShop;
-            string actionText = promptShop.CanSellHere && !promptShop.CanUpgradeHere ? "Sell" : promptShop.CanUpgradeHere && !promptShop.CanSellHere ? "Upgrade" : "Trade";
+            string actionText = promptShop.CanSellHere && !promptShop.CanUpgradeHere
+                ? GameLocalization.T("hud.action_sell")
+                : promptShop.CanUpgradeHere && !promptShop.CanSellHere ? GameLocalization.T("hud.action_upgrade") : GameLocalization.T("hud.action_trade");
             string icon = promptShop.CanSellHere && !promptShop.CanUpgradeHere ? "sell" : "upgrade";
             hintText.text = "E - " + actionText;
             ShowWorldPrompt(actionText, promptShop.shopNpc.position + Vector3.up * 1.35f, new Color(1f, 0.76f, 0.2f, 0.95f), icon, promptShop.shopNpc);
@@ -551,8 +577,9 @@ public class RuntimeGameUI : MonoBehaviour
 
         if (searchableChest != null)
         {
-            hintText.text = "E - Search";
-            ShowWorldPrompt("Search", diggingController.GetChestPromptPosition(searchableChest), new Color(1f, 0.76f, 0.2f, 0.95f), "treasure", diggingController.GetChestHighlightTarget(searchableChest));
+            string actionText = GameLocalization.T("hud.action_search");
+            hintText.text = "E - " + actionText;
+            ShowWorldPrompt(actionText, diggingController.GetChestPromptPosition(searchableChest), new Color(1f, 0.76f, 0.2f, 0.95f), "treasure", diggingController.GetChestHighlightTarget(searchableChest));
             return;
         }
 
@@ -560,16 +587,17 @@ public class RuntimeGameUI : MonoBehaviour
 
         if (digTarget != null)
         {
-            hintText.text = "E - Dig";
+            string actionText = GameLocalization.T("hud.action_dig");
+            hintText.text = "E - " + actionText;
             Vector3 promptPosition = digTarget.revealMarker != null
                 ? digTarget.revealMarker.transform.position + Vector3.up * 0.75f
                 : digTarget.transform.position + Vector3.up * 0.75f;
             Transform highlightTarget = digTarget.revealMarker != null ? digTarget.revealMarker.transform : digTarget.transform;
-            ShowWorldPrompt("Dig", promptPosition, new Color(0.25f, 0.88f, 1f, 0.95f), "treasure", highlightTarget);
+            ShowWorldPrompt(actionText, promptPosition, new Color(0.25f, 0.88f, 1f, 0.95f), "treasure", highlightTarget);
             return;
         }
 
-        hintText.text = "Hold LMB - Scan sand | TAB backpack | M map";
+        hintText.text = GameLocalization.T("hud.hint_default");
         HideWorldPrompt();
     }
 
@@ -702,7 +730,7 @@ public class RuntimeGameUI : MonoBehaviour
         AnimateShopSellZone();
 
         shopMessageText.text = inventory != null
-            ? "Cash $" + inventory.money + " | Cargo $" + inventory.GetInventoryValue() + (shop.MessageTimer > 0f ? " | " + shop.ShopMessage : "")
+            ? GameLocalization.TFormat("shop.money_cargo", inventory.money, inventory.GetInventoryValue()) + (shop.MessageTimer > 0f ? " | " + shop.ShopMessage : "")
             : "";
     }
 
@@ -783,19 +811,19 @@ public class RuntimeGameUI : MonoBehaviour
 
     private void BuildSellTab()
     {
-        shopTitleText.text = "Trader - Sell";
-        AddShopObject(CreateText("Drag treasures into the sell box or click an item card.", shopContent, new Vector2(18f, -14f), new Vector2(486f, 22f), 14, FontStyle.Normal, TextAnchor.MiddleLeft).gameObject);
+        shopTitleText.text = GameLocalization.T("shop.trader") + " - " + GameLocalization.T("shop.sell");
+        AddShopObject(CreateText(GameLocalization.T("shop.sell_help"), shopContent, new Vector2(18f, -14f), new Vector2(486f, 22f), 14, FontStyle.Normal, TextAnchor.MiddleLeft).gameObject);
 
         shopDropZone = CreatePanel("Sell Drop Zone", new Vector2(18f, -48f), new Vector2(488f, 74f), new Vector2(0f, 1f), shopContent);
         shopDropImage = shopDropZone.GetComponent<Image>();
         shopDropImage.color = new Color(0.08f, 0.18f, 0.13f, 0.92f);
         AddShopObject(shopDropZone.gameObject);
         CreateIconBadge(shopDropZone, new Vector2(14f, -15f), new Vector2(44f, 44f), "sell", new Color(0.35f, 0.92f, 0.62f, 1f));
-        shopDropText = CreateText("DROP TO SELL", shopDropZone, new Vector2(72f, -18f), new Vector2(380f, 34f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
+        shopDropText = CreateText(GameLocalization.T("shop.drop_to_sell"), shopDropZone, new Vector2(72f, -18f), new Vector2(380f, 34f), 18, FontStyle.Bold, TextAnchor.MiddleLeft);
 
         if (inventory == null || inventory.items.Count == 0)
         {
-            AddShopObject(CreateText("Backpack is empty. Go find something shiny.", shopContent, new Vector2(18f, -146f), new Vector2(486f, 26f), 16, FontStyle.Bold, TextAnchor.MiddleCenter).gameObject);
+            AddShopObject(CreateText(GameLocalization.T("shop.empty_backpack"), shopContent, new Vector2(18f, -146f), new Vector2(486f, 26f), 16, FontStyle.Bold, TextAnchor.MiddleCenter).gameObject);
             return;
         }
 
@@ -841,34 +869,34 @@ public class RuntimeGameUI : MonoBehaviour
 
     private void BuildUpgradesTab()
     {
-        shopTitleText.text = "Trader - Upgrades";
-        AddShopObject(CreateText("Spend cash to expand your search loop.", shopContent, new Vector2(18f, -14f), new Vector2(486f, 22f), 14, FontStyle.Normal, TextAnchor.MiddleLeft).gameObject);
+        shopTitleText.text = GameLocalization.T("shop.trader") + " - " + GameLocalization.T("shop.upgrades");
+        AddShopObject(CreateText(GameLocalization.T("shop.upgrade_help"), shopContent, new Vector2(18f, -14f), new Vector2(486f, 22f), 14, FontStyle.Normal, TextAnchor.MiddleLeft).gameObject);
 
-        string detectorTitle = metalDetector != null ? metalDetector.CurrentDetectorName + " " + metalDetector.CurrentScanCells + "x" + metalDetector.CurrentScanCells : "Metal Detector";
-        string detectorPrice = shop != null && metalDetector != null && metalDetector.CanUpgradeDetector ? "$" + shop.detectorUpgradeCost : "Maxed";
+        string detectorTitle = metalDetector != null ? metalDetector.CurrentDetectorName + " " + metalDetector.CurrentScanCells + "x" + metalDetector.CurrentScanCells : GameLocalization.T("shop.metal_detector");
+        string detectorPrice = shop != null && metalDetector != null && metalDetector.CanUpgradeDetector ? "$" + shop.detectorUpgradeCost : GameLocalization.T("shop.maxed");
         string detectorDescription = metalDetector != null && metalDetector.CanUpgradeDetector
-            ? "Next: " + metalDetector.GetDetectorName(metalDetector.DetectorTier + 1) + " scans " + metalDetector.GetScanCellsForTier(metalDetector.DetectorTier + 1) + "x" + metalDetector.GetScanCellsForTier(metalDetector.DetectorTier + 1) + " cells."
-            : "Your detector scans the maximum 6x6 grid.";
+            ? GameLocalization.TFormat("shop.detector_next", metalDetector.GetDetectorName(metalDetector.DetectorTier + 1), metalDetector.GetScanCellsForTier(metalDetector.DetectorTier + 1))
+            : GameLocalization.T("shop.detector_maxed");
         AddShopObject(CreateUpgradeCard("detector", detectorTitle, detectorDescription, detectorPrice, new Vector2(18f, -50f), () =>
         {
             shop?.TryBuyDetectorUpgrade();
             shopDirty = true;
         }).gameObject);
 
-        AddShopObject(CreateUpgradeCard("bag", "Backpack Size", "Adds another row and column to your backpack.", "$" + (shop != null ? shop.inventoryUpgradeCost : 0), new Vector2(18f, -128f), () =>
+        AddShopObject(CreateUpgradeCard("bag", GameLocalization.T("shop.backpack_size"), GameLocalization.T("shop.backpack_description"), "$" + (shop != null ? shop.inventoryUpgradeCost : 0), new Vector2(18f, -128f), () =>
         {
             shop?.TryBuyInventoryUpgrade();
             shopDirty = true;
         }).gameObject);
 
-        string shovelCost = shop != null && shop.shovelUpgraded ? "Equipped" : "$" + (shop != null ? shop.shovelUpgradeCost : 0);
-        AddShopObject(CreateUpgradeCard("shovel", "Clean Shovel", "Replaces the rusty shovel animation with the clean silver shovel.", shovelCost, new Vector2(18f, -206f), () =>
+        string shovelCost = shop != null && shop.shovelUpgraded ? GameLocalization.T("shop.equipped") : "$" + (shop != null ? shop.shovelUpgradeCost : 0);
+        AddShopObject(CreateUpgradeCard("shovel", GameLocalization.T("shop.clean_shovel"), GameLocalization.T("shop.clean_shovel_description"), shovelCost, new Vector2(18f, -206f), () =>
         {
             shop?.TryBuyShovelUpgrade();
             shopDirty = true;
         }).gameObject);
 
-        AddShopObject(CreateUpgradeCard("map", "Search Areas", "Buy land at the sign next to each plot.", "Visit", new Vector2(18f, -284f), () =>
+        AddShopObject(CreateUpgradeCard("map", GameLocalization.T("shop.search_areas"), GameLocalization.T("shop.search_areas_description"), GameLocalization.T("shop.visit"), new Vector2(18f, -284f), () =>
         {
             shop?.ShowLocationPurchaseHint();
             shopDirty = true;
@@ -958,27 +986,13 @@ public class RuntimeGameUI : MonoBehaviour
 
         if (shopDropText != null)
         {
-            shopDropText.text = activeShopDragItem != null ? "RELEASE TO SELL" : "DROP TO SELL";
+            shopDropText.text = activeShopDragItem != null ? GameLocalization.T("shop.release_to_sell") : GameLocalization.T("shop.drop_to_sell");
         }
     }
 
     private void AddShopObject(GameObject contentObject)
     {
         shopContentObjects.Add(contentObject);
-    }
-
-    private void RefreshMap()
-    {
-        bool isOpen = treasureMap != null && (treasureMap.showSmallMap || treasureMap.showLargeMap);
-        mapPanel.gameObject.SetActive(isOpen);
-
-        if (!isOpen)
-        {
-            return;
-        }
-
-        mapTitleText.text = "Search Map";
-        RebuildMapDots();
     }
 
     private void RebuildInventoryGrid()
@@ -1020,54 +1034,6 @@ public class RuntimeGameUI : MonoBehaviour
             iconImage.transform.SetAsFirstSibling();
             CreateText("$" + item.value, itemRect, new Vector2(4f, -itemHeight + 18f), new Vector2(itemWidth - 8f, 16f), 11, FontStyle.Bold, TextAnchor.MiddleCenter);
         }
-    }
-
-    private void RebuildMapDots()
-    {
-        foreach (GameObject dot in mapDots)
-        {
-            Destroy(dot);
-        }
-
-        mapDots.Clear();
-
-        if (treasureMap == null)
-        {
-            return;
-        }
-
-        foreach (Vector3 position in treasureMap.CheckedPositions)
-        {
-            Vector2 mapPosition = WorldToMapPosition(position);
-            mapDots.Add(CreateDot("Checked Dot", mapPosition, new Color(0.7f, 0.66f, 0.56f, 1f), 8f).gameObject);
-        }
-
-        if (treasureMap.player != null)
-        {
-            Vector2 playerPosition = WorldToMapPosition(treasureMap.player.position);
-            mapDots.Add(CreateDot("Player Dot", playerPosition, new Color(1f, 0.76f, 0.2f, 1f), 12f).gameObject);
-        }
-    }
-
-    private Vector2 WorldToMapPosition(Vector3 worldPosition)
-    {
-        Vector2 worldSize = treasureMap != null ? treasureMap.worldSize : new Vector2(1000f, 1000f);
-        RectTransform rectTransform = mapContent;
-        float normalizedX = Mathf.InverseLerp(-worldSize.x * 0.5f, worldSize.x * 0.5f, worldPosition.x);
-        float normalizedY = Mathf.InverseLerp(-worldSize.y * 0.5f, worldSize.y * 0.5f, worldPosition.z);
-        return new Vector2(normalizedX * rectTransform.rect.width, -(1f - normalizedY) * rectTransform.rect.height);
-    }
-
-    private RectTransform CreateDot(string dotName, Vector2 anchoredPosition, Color color, float size)
-    {
-        RectTransform dot = CreateUiObject(dotName, mapContent);
-        dot.anchorMin = new Vector2(0f, 1f);
-        dot.anchorMax = new Vector2(0f, 1f);
-        dot.pivot = new Vector2(0.5f, 0.5f);
-        dot.anchoredPosition = anchoredPosition;
-        dot.sizeDelta = new Vector2(size, size);
-        dot.gameObject.AddComponent<Image>().color = color;
-        return dot;
     }
 
     private RectTransform CreatePanel(string panelName, Vector2 anchoredPosition, Vector2 size, Vector2 anchor, Transform parent)
@@ -1215,15 +1181,15 @@ public class RuntimeGameUI : MonoBehaviour
         switch (tier)
         {
             case RewardTier.Jackpot:
-                return "JACKPOT!";
+                return GameLocalization.T("toast.reward_jackpot");
             case RewardTier.Valuable:
-                return "Great Find!";
+                return GameLocalization.T("toast.reward_valuable");
             case RewardTier.Okay:
-                return "Nice Find";
+                return GameLocalization.T("toast.reward_okay");
             case RewardTier.Trash:
-                return "Found Something";
+                return GameLocalization.T("toast.reward_trash");
             default:
-                return "Info";
+                return GameLocalization.T("toast.info");
         }
     }
 
@@ -1236,27 +1202,32 @@ public class RuntimeGameUI : MonoBehaviour
 
         if (foundToastIsDigProgress)
         {
-            return "Digging";
+            return GameLocalization.T("toast.digging");
         }
 
         string message = currentFoundToastMessage ?? "";
 
         if (message.Contains("Too dark"))
         {
-            return "Too Dark";
+            return GameLocalization.T("toast.too_dark");
         }
 
         if (message.Contains("Backpack is full"))
         {
-            return "Backpack Full";
+            return GameLocalization.T("toast.backpack_full");
         }
 
         if (message.Contains("No marked target"))
         {
-            return "No Target";
+            return GameLocalization.T("toast.no_target");
         }
 
-        return "Notice";
+        if (message.Contains("Searching chest"))
+        {
+            return GameLocalization.T("hud.action_search");
+        }
+
+        return GameLocalization.T("toast.notice");
     }
 
     private string GetToastBody()
@@ -1268,19 +1239,34 @@ public class RuntimeGameUI : MonoBehaviour
 
         if (foundToastIsDigProgress && diggingController != null)
         {
-            return "Unearthing target  " + diggingController.LastDigCurrentHits + " / " + diggingController.LastDigRequiredHits;
+            return GameLocalization.TFormat("toast.digging_progress", diggingController.LastDigCurrentHits, diggingController.LastDigRequiredHits);
         }
 
         string message = currentFoundToastMessage ?? "";
 
         if (message.Contains("No marked target"))
         {
-            return "Scan with the detector first.";
+            return GameLocalization.T("toast.scan_first");
+        }
+
+        if (message.Contains("Backpack is full"))
+        {
+            return GameLocalization.T("toast.backpack_full_body");
+        }
+
+        if (message.Contains("Searching chest"))
+        {
+            return GameLocalization.T("toast.searching_chest");
+        }
+
+        if (message.Contains("Chest exposed"))
+        {
+            return GameLocalization.T("toast.chest_exposed");
         }
 
         if (message.Contains("Too dark"))
         {
-            return "Sleep at home until morning.";
+            return GameLocalization.T("toast.sleep_morning");
         }
 
         return message;
@@ -1291,13 +1277,13 @@ public class RuntimeGameUI : MonoBehaviour
         switch (tier)
         {
             case RewardTier.Jackpot:
-                return "Huge treasure found:";
+                return GameLocalization.T("toast.subtitle_jackpot");
             case RewardTier.Valuable:
-                return "You found something valuable:";
+                return GameLocalization.T("toast.subtitle_valuable");
             case RewardTier.Okay:
-                return "You found:";
+                return GameLocalization.T("toast.subtitle_okay");
             case RewardTier.Trash:
-                return "A tiny find:";
+                return GameLocalization.T("toast.subtitle_trash");
             default:
                 return "";
         }

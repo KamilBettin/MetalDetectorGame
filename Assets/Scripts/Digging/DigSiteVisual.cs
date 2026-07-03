@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -7,6 +8,7 @@ using UnityEditor;
 
 public class DigSiteVisual : MonoBehaviour
 {
+    private const float SearchAnimationDuration = 1.18f;
     private const float SurfaceOffset = 0.0035f;
     private const float MaxSlopeAlignDegrees = 28f;
     private const string ChestPrefabPath = "Assets/Treasure chest closed/treasure_chest_closed.prefab";
@@ -36,6 +38,8 @@ public class DigSiteVisual : MonoBehaviour
     private Transform darkCenter;
     private Transform innerShadow;
     private Transform chestRoot;
+    private Transform searchFxRoot;
+    private Transform searchGlow;
     private Material soilMaterial;
     private Material soilDarkMaterial;
     private Material soilPieceMaterial;
@@ -43,11 +47,14 @@ public class DigSiteVisual : MonoBehaviour
     private Material configuredSoilSource;
     private Vector3 chestBaseScale = Vector3.one;
     private bool searched;
+    private bool searchAnimationPlaying;
     private float progress;
     private float readyPulse;
+    private readonly List<Transform> searchSparkles = new List<Transform>();
 
     public DetectableTreasure Treasure => treasure;
     public bool IsReadyToSearch => treasure != null && !treasure.isFound && treasure.currentDigHits >= Mathf.Max(1, treasure.requiredDigHits);
+    public bool IsSearchAnimationPlaying => searchAnimationPlaying;
     public Vector3 PromptPosition => chestRoot != null ? chestRoot.position + Vector3.up * 0.55f : transform.position + Vector3.up * 0.85f;
     public Transform HighlightTarget => chestRoot != null ? chestRoot : transform;
 
@@ -135,11 +142,34 @@ public class DigSiteVisual : MonoBehaviour
     {
         searched = true;
 
+        if (searchFxRoot != null)
+        {
+            Destroy(searchFxRoot.gameObject);
+            searchFxRoot = null;
+            searchGlow = null;
+            searchSparkles.Clear();
+        }
+
         if (chestRoot != null)
         {
             Destroy(chestRoot.gameObject);
             chestRoot = null;
         }
+    }
+
+    public float PlaySearchAnimation()
+    {
+        if (!isActiveAndEnabled || chestRoot == null)
+        {
+            return 0.85f;
+        }
+
+        if (!searchAnimationPlaying)
+        {
+            StartCoroutine(SearchAnimationRoutine());
+        }
+
+        return SearchAnimationDuration;
     }
 
     private void Initialize(DetectableTreasure targetTreasure, Vector3 worldPosition, GameObject chestPrefab, Material configuredSandMaterial, Material configuredSoilMaterial)
@@ -290,15 +320,15 @@ public class DigSiteVisual : MonoBehaviour
         }
 
         GameObject chestPrefab = configuredChestPrefab != null ? configuredChestPrefab : LoadEditorChestPrefab();
+        bool usingPrefabChest = chestPrefab != null;
         GameObject chestObject = chestPrefab != null ? Instantiate(chestPrefab) : CreateProceduralChest();
         chestObject.name = "Unearthed Treasure Chest";
         chestRoot = chestObject.transform;
         chestRoot.SetParent(transform, false);
         chestRoot.localRotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
-        NormalizeChestScale(chestObject, new Vector3(0.48f, 0.3f, 0.34f));
+        NormalizeChestScale(chestObject, new Vector3(0.68f, 0.42f, 0.48f));
         chestBaseScale = chestRoot.localScale;
         DisableCollidersInChildren(chestObject);
-        ApplyChestMaterials(chestObject);
     }
 
     private void UpdatePieces(List<DirtPiece> pieces, float easedProgress, float spread)
@@ -397,12 +427,12 @@ public class DigSiteVisual : MonoBehaviour
         float reveal = Mathf.Clamp01(Mathf.InverseLerp(0.18f, 1f, easedProgress));
         chestRoot.gameObject.SetActive(reveal > 0.02f || searched);
 
-        if (searched)
+        if (searched || searchAnimationPlaying)
         {
             return;
         }
 
-        float y = Mathf.Lerp(-0.34f, 0.09f, Mathf.SmoothStep(0f, 1f, reveal));
+        float y = Mathf.Lerp(-0.26f, 0.16f, Mathf.SmoothStep(0f, 1f, reveal));
         chestRoot.localPosition = new Vector3(0f, y, 0f);
         chestRoot.localScale = chestBaseScale * Mathf.Lerp(0.82f, 1f, reveal);
 
@@ -411,6 +441,160 @@ public class DigSiteVisual : MonoBehaviour
             readyPulse += Time.deltaTime * 5.5f;
             chestRoot.localPosition += Vector3.up * (Mathf.Sin(readyPulse) * 0.016f);
         }
+    }
+
+    private IEnumerator SearchAnimationRoutine()
+    {
+        searchAnimationPlaying = true;
+        EnsureSearchEffects();
+
+        if (searchFxRoot != null)
+        {
+            searchFxRoot.gameObject.SetActive(true);
+        }
+
+        Vector3 basePosition = chestRoot.localPosition;
+        Quaternion baseRotation = chestRoot.localRotation;
+        Vector3 baseScale = chestRoot.localScale;
+        Transform lid = FindChestPart(chestRoot, "lid", "cover", "top");
+        Quaternion lidBaseRotation = lid != null ? lid.localRotation : Quaternion.identity;
+        float elapsed = 0f;
+
+        while (elapsed < SearchAnimationDuration && chestRoot != null)
+        {
+            float t = Mathf.Clamp01(elapsed / SearchAnimationDuration);
+            float shakeOut = 1f - Mathf.SmoothStep(0.25f, 0.78f, t);
+            float open = Mathf.SmoothStep(0.16f, 0.72f, t);
+            float pop = Mathf.Sin(Mathf.Clamp01(t / 0.36f) * Mathf.PI) * 0.055f;
+            float settle = Mathf.SmoothStep(0.78f, 1f, t);
+            float shakeX = Mathf.Sin(elapsed * 42f) * 2.8f * shakeOut;
+            float shakeY = Mathf.Sin(elapsed * 54f) * 6.5f * shakeOut;
+            float shakeZ = Mathf.Sin(elapsed * 36f) * 2.6f * shakeOut;
+
+            chestRoot.localPosition = basePosition + Vector3.up * (Mathf.Sin(t * Mathf.PI) * 0.05f + open * 0.025f);
+            chestRoot.localRotation = baseRotation * Quaternion.Euler(shakeX, shakeY, shakeZ);
+            chestRoot.localScale = Vector3.Lerp(baseScale * (1f + pop), baseScale, settle);
+
+            if (lid != null)
+            {
+                lid.localRotation = lidBaseRotation * Quaternion.Euler(-72f * open, 0f, 0f);
+            }
+
+            UpdateSearchEffects(t, chestRoot.localPosition);
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        if (chestRoot != null)
+        {
+            chestRoot.localPosition = basePosition;
+            chestRoot.localRotation = baseRotation;
+            chestRoot.localScale = baseScale;
+        }
+
+        if (searchFxRoot != null)
+        {
+            searchFxRoot.gameObject.SetActive(false);
+        }
+
+        searchAnimationPlaying = false;
+    }
+
+    private void EnsureSearchEffects()
+    {
+        if (searchFxRoot != null)
+        {
+            return;
+        }
+
+        GameObject root = new GameObject("Chest Search FX");
+        searchFxRoot = root.transform;
+        searchFxRoot.SetParent(transform, false);
+
+        Material glowMaterial = CreateTransparentMaterial(new Color(1f, 0.72f, 0.18f, 0.34f));
+        GameObject glow = CreatePrimitive("Search Glow", PrimitiveType.Cylinder, glowMaterial);
+        searchGlow = glow.transform;
+        searchGlow.SetParent(searchFxRoot, false);
+
+        Material sparkleMaterial = CreateTransparentMaterial(new Color(1f, 0.82f, 0.24f, 0.9f));
+        searchSparkles.Clear();
+
+        for (int i = 0; i < 10; i++)
+        {
+            GameObject sparkle = CreatePrimitive("Search Sparkle", PrimitiveType.Sphere, sparkleMaterial);
+            sparkle.transform.SetParent(searchFxRoot, false);
+            searchSparkles.Add(sparkle.transform);
+        }
+
+        searchFxRoot.gameObject.SetActive(false);
+    }
+
+    private void UpdateSearchEffects(float t, Vector3 chestLocalPosition)
+    {
+        if (searchFxRoot == null)
+        {
+            return;
+        }
+
+        float burst = Mathf.Sin(Mathf.Clamp01(t) * Mathf.PI);
+        float glowScale = Mathf.Lerp(0.22f, 0.86f, Mathf.SmoothStep(0.05f, 0.82f, t)) * Mathf.Lerp(1f, 0.18f, Mathf.SmoothStep(0.78f, 1f, t));
+
+        if (searchGlow != null)
+        {
+            searchGlow.localPosition = chestLocalPosition + new Vector3(0f, 0.23f + burst * 0.11f, 0f);
+            searchGlow.localRotation = Quaternion.identity;
+            searchGlow.localScale = new Vector3(glowScale, 0.006f, glowScale);
+        }
+
+        for (int i = 0; i < searchSparkles.Count; i++)
+        {
+            Transform sparkle = searchSparkles[i];
+
+            if (sparkle == null)
+            {
+                continue;
+            }
+
+            float offset = i * 0.173f;
+            float phase = Mathf.Repeat(t + offset, 1f);
+            float angle = i / (float)Mathf.Max(1, searchSparkles.Count) * Mathf.PI * 2f + t * 2.1f;
+            float radius = Mathf.Lerp(0.04f, 0.42f + (i % 3) * 0.05f, Mathf.SmoothStep(0f, 1f, phase));
+            float y = Mathf.Lerp(0.16f, 0.64f + (i % 2) * 0.08f, phase) + Mathf.Sin((phase + offset) * Mathf.PI) * 0.12f;
+            float scale = Mathf.Lerp(0.035f, 0.006f, Mathf.SmoothStep(0.1f, 1f, phase)) * Mathf.Lerp(1f, 0.2f, Mathf.SmoothStep(0.85f, 1f, t));
+
+            sparkle.localPosition = chestLocalPosition + new Vector3(Mathf.Cos(angle) * radius, y, Mathf.Sin(angle) * radius);
+            sparkle.localScale = Vector3.one * scale;
+        }
+    }
+
+    private static Transform FindChestPart(Transform root, params string[] nameFragments)
+    {
+        if (root == null)
+        {
+            return null;
+        }
+
+        Transform[] transforms = root.GetComponentsInChildren<Transform>(true);
+
+        foreach (Transform candidate in transforms)
+        {
+            if (candidate == null || candidate == root)
+            {
+                continue;
+            }
+
+            string name = candidate.name.ToLowerInvariant();
+
+            for (int i = 0; i < nameFragments.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(nameFragments[i]) && name.Contains(nameFragments[i]))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
     }
 
     private void Update()

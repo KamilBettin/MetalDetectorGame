@@ -84,7 +84,7 @@ public class UpgradeShop : MonoBehaviour
     {
         if (!allowSelling)
         {
-            ShowMessage("This trader handles upgrades.");
+            ShowMessage(GameLocalization.T("shop.msg_trader_upgrades"));
             return;
         }
 
@@ -98,11 +98,11 @@ public class UpgradeShop : MonoBehaviour
 
         if (earnedMoney <= 0)
         {
-            ShowMessage("You have nothing to sell.");
+            ShowMessage(GameLocalization.T("shop.msg_nothing_sell"));
             return;
         }
 
-        ShowMessage("Sold treasures for $" + earnedMoney + ".");
+        ShowMessage(GameLocalization.TFormat("shop.msg_sold_treasures", earnedMoney));
         GameEvents.ReportTreasuresSold(soldCount);
         LocalCoopManager.Instance?.ReportTeamStateChanged();
     }
@@ -111,7 +111,7 @@ public class UpgradeShop : MonoBehaviour
     {
         if (!allowSelling)
         {
-            ShowMessage("This trader handles upgrades.");
+            ShowMessage(GameLocalization.T("shop.msg_trader_upgrades"));
             return;
         }
 
@@ -122,17 +122,17 @@ public class UpgradeShop : MonoBehaviour
 
         if (item == null)
         {
-            ShowMessage("Choose an item to sell.");
+            ShowMessage(GameLocalization.T("shop.msg_choose_item"));
             return;
         }
 
         if (!playerInventory.SellItem(item))
         {
-            ShowMessage("That item is no longer in your backpack.");
+            ShowMessage(GameLocalization.T("shop.msg_item_missing"));
             return;
         }
 
-        ShowMessage("Sold " + item.itemName + " for $" + item.value + ".");
+        ShowMessage(GameLocalization.TFormat("shop.msg_sold_item", item.itemName, item.value));
         GameEvents.ReportTreasuresSold(1);
         LocalCoopManager.Instance?.ReportTeamStateChanged();
     }
@@ -141,7 +141,7 @@ public class UpgradeShop : MonoBehaviour
     {
         if (!allowUpgrades)
         {
-            ShowMessage("This trader only buys treasures.");
+            ShowMessage(GameLocalization.T("shop.msg_only_buys"));
             return;
         }
 
@@ -152,24 +152,24 @@ public class UpgradeShop : MonoBehaviour
 
         if (metalDetector == null)
         {
-            ShowMessage("Shop is not connected.");
+            ShowMessage(GameLocalization.T("shop.msg_not_connected"));
             return;
         }
 
         if (metalDetector.DetectionRange >= maxDetectionRange)
         {
-            ShowMessage("Detector range is maxed.");
+            ShowMessage(GameLocalization.T("shop.msg_range_maxed"));
             return;
         }
 
         if (!playerInventory.TrySpendMoney(rangeUpgradeCost))
         {
-            ShowMessage("Not enough money. Need $" + rangeUpgradeCost + ".");
+            ShowMessage(GameLocalization.TFormat("shop.msg_not_enough", rangeUpgradeCost));
             return;
         }
 
         metalDetector.IncreaseRange(rangeIncrease);
-        ShowMessage("Range upgraded to " + metalDetector.DetectionRange.ToString("0.#") + "m.");
+        ShowMessage(GameLocalization.TFormat("shop.msg_range_upgraded", metalDetector.DetectionRange.ToString("0.#")));
 
         rangeUpgradeCost += costIncrease;
         LocalCoopManager.Instance?.ReportTeamStateChanged();
@@ -179,7 +179,7 @@ public class UpgradeShop : MonoBehaviour
     {
         if (!allowUpgrades)
         {
-            ShowMessage("This trader only buys treasures.");
+            ShowMessage(GameLocalization.T("shop.msg_only_buys"));
             return;
         }
 
@@ -190,24 +190,24 @@ public class UpgradeShop : MonoBehaviour
 
         if (metalDetector == null)
         {
-            ShowMessage("Shop is not connected.");
+            ShowMessage(GameLocalization.T("shop.msg_not_connected"));
             return;
         }
 
         if (!metalDetector.CanUpgradeDetector)
         {
-            ShowMessage("Detector model is maxed.");
+            ShowMessage(GameLocalization.T("shop.msg_detector_maxed"));
             return;
         }
 
         if (!playerInventory.TrySpendMoney(detectorUpgradeCost))
         {
-            ShowMessage("Not enough money. Need $" + detectorUpgradeCost + ".");
+            ShowMessage(GameLocalization.TFormat("shop.msg_not_enough", detectorUpgradeCost));
             return;
         }
 
         metalDetector.TryUpgradeDetector();
-        ShowMessage("Detector upgraded: " + metalDetector.CurrentDetectorName + " (" + metalDetector.CurrentScanCells + "x" + metalDetector.CurrentScanCells + ").");
+        ShowMessage(GameLocalization.TFormat("shop.msg_detector_upgraded", metalDetector.CurrentDetectorName, metalDetector.CurrentScanCells));
         detectorUpgradeCost += costIncrease;
         LocalCoopManager.Instance?.ReportTeamStateChanged();
     }
@@ -216,7 +216,7 @@ public class UpgradeShop : MonoBehaviour
     {
         if (!allowUpgrades)
         {
-            ShowMessage("This trader only buys treasures.");
+            ShowMessage(GameLocalization.T("shop.msg_only_buys"));
             return;
         }
 
@@ -227,18 +227,18 @@ public class UpgradeShop : MonoBehaviour
 
         if (!playerInventory.CanUpgradeGrid())
         {
-            ShowMessage("Backpack size is maxed.");
+            ShowMessage(GameLocalization.T("shop.msg_backpack_maxed"));
             return;
         }
 
         if (!playerInventory.TrySpendMoney(inventoryUpgradeCost))
         {
-            ShowMessage("Not enough money. Need $" + inventoryUpgradeCost + ".");
+            ShowMessage(GameLocalization.TFormat("shop.msg_not_enough", inventoryUpgradeCost));
             return;
         }
 
         playerInventory.TryUpgradeGrid();
-        ShowMessage("Backpack upgraded to " + playerInventory.gridSize + "x" + playerInventory.gridSize + ".");
+        ShowMessage(GameLocalization.TFormat("shop.msg_backpack_upgraded", playerInventory.gridSize));
 
         inventoryUpgradeCost += inventoryCostIncrease;
         LocalCoopManager.Instance?.ReportTeamStateChanged();
@@ -248,7 +248,7 @@ public class UpgradeShop : MonoBehaviour
     {
         if (!allowUpgrades)
         {
-            ShowMessage("This trader only buys treasures.");
+            ShowMessage(GameLocalization.T("shop.msg_only_buys"));
             return;
         }
 
@@ -259,18 +259,18 @@ public class UpgradeShop : MonoBehaviour
 
         if (shovelUpgraded)
         {
-            ShowMessage("Shovel is already upgraded.");
+            ShowMessage(GameLocalization.T("shop.msg_shovel_already"));
             return;
         }
 
         if (!playerInventory.TrySpendMoney(shovelUpgradeCost))
         {
-            ShowMessage("Not enough money. Need $" + shovelUpgradeCost + ".");
+            ShowMessage(GameLocalization.TFormat("shop.msg_not_enough", shovelUpgradeCost));
             return;
         }
 
         shovelUpgraded = true;
-        ShowMessage("Clean shovel equipped.");
+        ShowMessage(GameLocalization.T("shop.msg_shovel_equipped"));
         LocalCoopManager.Instance?.ReportTeamStateChanged();
     }
 
@@ -278,7 +278,7 @@ public class UpgradeShop : MonoBehaviour
     {
         if (!allowUpgrades)
         {
-            ShowMessage("This trader only buys treasures.");
+            ShowMessage(GameLocalization.T("shop.msg_only_buys"));
             return;
         }
 
@@ -289,13 +289,13 @@ public class UpgradeShop : MonoBehaviour
     {
         if (playerInventory == null || shopNpc == null)
         {
-            ShowMessage("Shop is not connected.");
+            ShowMessage(GameLocalization.T("shop.msg_not_connected"));
             return false;
         }
 
         if (Vector3.Distance(transform.position, shopNpc.position) > interactionDistance)
         {
-            ShowMessage("Go to the trader first.");
+            ShowMessage(GameLocalization.T("shop.msg_go_trader"));
             return false;
         }
 
@@ -310,7 +310,7 @@ public class UpgradeShop : MonoBehaviour
 
     public void ShowLocationPurchaseHint()
     {
-        ShowMessage("Buy land at the sign next to each search area.");
+        ShowMessage(GameLocalization.T("shop.location_hint"));
     }
 
     private void OnGUI()
@@ -331,7 +331,7 @@ public class UpgradeShop : MonoBehaviour
         {
             if (isNearShop)
             {
-                GameGui.DrawToast(new Rect(Screen.width * 0.5f - 150f, Screen.height - 178f, 300f, 40f), "Press E to talk to " + shopDisplayName);
+                GameGui.DrawToast(new Rect(Screen.width * 0.5f - 150f, Screen.height - 178f, 300f, 40f), GameLocalization.TFormat("shop.prompt_talk", shopDisplayName));
             }
 
             if (messageTimer > 0f)
@@ -344,24 +344,24 @@ public class UpgradeShop : MonoBehaviour
 
         string rangeText = metalDetector != null
             ? metalDetector.DetectionRange.ToString("0.#") + "m"
-            : "not connected";
+            : GameLocalization.T("shop.msg_not_connected");
         string detectorUpgradeText = metalDetector != null && metalDetector.CanUpgradeDetector
-            ? "Upgrade detector to " + metalDetector.GetDetectorName(metalDetector.DetectorTier + 1) + " " + metalDetector.GetScanCellsForTier(metalDetector.DetectorTier + 1) + "x" + metalDetector.GetScanCellsForTier(metalDetector.DetectorTier + 1) + " ($" + detectorUpgradeCost + ")"
-            : "Detector model maxed";
+            ? GameLocalization.TFormat("shop.upgrade_detector_to", metalDetector.GetDetectorName(metalDetector.DetectorTier + 1), metalDetector.GetScanCellsForTier(metalDetector.DetectorTier + 1), detectorUpgradeCost)
+            : GameLocalization.T("shop.detector_model_maxed");
         string inventoryUpgradeText = playerInventory.CanUpgradeGrid()
-            ? "Upgrade backpack " + playerInventory.gridSize + "x" + playerInventory.gridSize + " -> " + (playerInventory.gridSize + 1) + "x" + (playerInventory.gridSize + 1) + " ($" + inventoryUpgradeCost + ")"
-            : "Backpack size maxed";
+            ? GameLocalization.TFormat("shop.upgrade_backpack_to", playerInventory.gridSize, playerInventory.gridSize + 1, inventoryUpgradeCost)
+            : GameLocalization.T("shop.backpack_size_maxed");
         string shovelUpgradeText = shovelUpgraded
-            ? "Clean shovel equipped"
-            : "Upgrade shovel ($" + shovelUpgradeCost + ")";
+            ? GameLocalization.T("shop.msg_shovel_equipped")
+            : GameLocalization.TFormat("shop.upgrade_shovel", shovelUpgradeCost);
 
         Rect panelRect = new Rect(Screen.width * 0.5f - 230f, Screen.height * 0.5f - 190f, 460f, 380f);
         GameGui.DrawPanel(panelRect, shopDisplayName);
-        GUI.Label(new Rect(panelRect.x + 24f, panelRect.y + 44f, 390f, 22f), "Money: $" + playerInventory.money + " | Cargo value: $" + playerInventory.GetInventoryValue(), GameGui.LabelStyle);
-        GUI.Label(new Rect(panelRect.x + 24f, panelRect.y + 68f, 390f, 22f), "Detector range: " + rangeText, GameGui.SmallLabelStyle);
-        GUI.Label(new Rect(panelRect.x + 24f, panelRect.y + 90f, 390f, 22f), "Backpack: " + playerInventory.gridSize + "x" + playerInventory.gridSize, GameGui.SmallLabelStyle);
+        GUI.Label(new Rect(panelRect.x + 24f, panelRect.y + 44f, 390f, 22f), GameLocalization.TFormat("shop.money_cargo", playerInventory.money, playerInventory.GetInventoryValue()), GameGui.LabelStyle);
+        GUI.Label(new Rect(panelRect.x + 24f, panelRect.y + 68f, 390f, 22f), GameLocalization.TFormat("shop.detector_range", rangeText), GameGui.SmallLabelStyle);
+        GUI.Label(new Rect(panelRect.x + 24f, panelRect.y + 90f, 390f, 22f), GameLocalization.T("inventory.backpack") + ": " + playerInventory.gridSize + "x" + playerInventory.gridSize, GameGui.SmallLabelStyle);
 
-        if (allowSelling && GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 128f, 412f, 34f), "Sell all treasures ($" + playerInventory.GetInventoryValue() + ")"))
+        if (allowSelling && GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 128f, 412f, 34f), GameLocalization.TFormat("shop.sell_all", playerInventory.GetInventoryValue())))
         {
             TrySellAll();
         }
@@ -381,7 +381,7 @@ public class UpgradeShop : MonoBehaviour
             TryBuyShovelUpgrade();
         }
 
-        if (allowUpgrades && GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 296f, 412f, 34f), "Buy land at plot signs"))
+        if (allowUpgrades && GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 296f, 412f, 34f), GameLocalization.T("shop.buy_land_signs")))
         {
             TryBuyLocation();
         }

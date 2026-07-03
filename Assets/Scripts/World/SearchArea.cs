@@ -24,24 +24,24 @@ public class SearchArea : MonoBehaviour
     {
         if (isUnlocked)
         {
-            message = areaName + " is already unlocked.";
+            message = GameLocalization.TFormat("area.already_unlocked", areaName);
             return false;
         }
 
         if (playerInventory == null)
         {
-            message = "No player inventory found.";
+            message = GameLocalization.T("area.no_inventory");
             return false;
         }
 
         if (!playerInventory.TrySpendMoney(unlockCost))
         {
-            message = "Need $" + unlockCost + " to unlock " + areaName + ".";
+            message = GameLocalization.TFormat("area.need_money", unlockCost, areaName);
             return false;
         }
 
         SetUnlocked(true);
-        message = "Unlocked " + areaName + ".";
+        message = GameLocalization.TFormat("area.unlocked", areaName);
         return true;
     }
 
