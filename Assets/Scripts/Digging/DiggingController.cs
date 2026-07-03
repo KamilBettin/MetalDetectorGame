@@ -106,13 +106,7 @@ public class DiggingController : MonoBehaviour
 
         if (treasure == null)
         {
-            lastFoundMessage = "No marked target here. Scan with LMB first.";
-            lastFoundIcon = null;
-            lastFoundWasTreasure = false;
-            lastFoundItemName = "";
-            lastFoundValue = 0;
             ClearDigProgress();
-            messageTimer = 2f;
             return;
         }
 

@@ -19,9 +19,22 @@ public static class GameBootstrapper
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Bootstrap()
     {
+        EnsureGlobalObjects();
         EnsureSceneObjects();
         EnsureRetryRunner();
 
+        GameSaveSystem.CaptureInitialDefaults();
+    }
+
+    private static void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        EnsureGlobalObjects();
+        EnsureSceneObjects();
+        EnsureRetryRunner();
+    }
+
+    private static void EnsureGlobalObjects()
+    {
         if (Object.FindAnyObjectByType<TutorialQuestSystem>() == null)
         {
             new GameObject("Tutorial Quest System").AddComponent<TutorialQuestSystem>();
@@ -51,18 +64,21 @@ public static class GameBootstrapper
         {
             new GameObject("Start Menu UI").AddComponent<StartMenuUI>();
         }
-
-        GameSaveSystem.CaptureInitialDefaults();
-    }
-
-    private static void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
-    {
-        EnsureSceneObjects();
-        EnsureRetryRunner();
     }
 
     private static void EnsureSceneObjects()
     {
+        RunBootstrapStep("scene transition manager", SceneTransitionManager.EnsureExists);
+
+        if (SceneTransitionManager.IsHomeInteriorActive)
+        {
+            RunBootstrapStep("home interior scene repair", SceneTransitionManager.PrepareHomeInteriorScene);
+            RunBootstrapStep("local player avatar", EnsureLocalPlayerAvatarVisual);
+            RunBootstrapStep("event system", EnsureEventSystem);
+            RunBootstrapStep("home interior exit", SceneTransitionManager.EnsureInteriorExitPortal);
+            return;
+        }
+
         RunBootstrapStep("UMA runtime", () => UmaCharacterFactory.EnsureRuntime());
         RunBootstrapStep("day night cycle", DayNightCycleBootstrapper.EnsureDayNightCycle);
         RunBootstrapStep("default search areas", DefaultSearchAreaBootstrapper.EnsureDefaultSearchAreas);

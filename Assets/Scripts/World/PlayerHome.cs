@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 
 public class PlayerHome : MonoBehaviour
 {
@@ -15,14 +16,19 @@ public class PlayerHome : MonoBehaviour
     public PlayerInventory playerInventory;
     public Transform player;
     public DetectorBattery detectorBattery;
+    public Renderer[] highlightRenderers;
+    public Color highlightColor = new Color(0.2f, 1f, 0.35f, 1f);
 
     private readonly List<PlayerInventory.InventorySlot> storedItems = new List<PlayerInventory.InventorySlot>();
     private readonly PlayerInventory.InventorySlot[] craftingSlots = new PlayerInventory.InventorySlot[9];
+    private readonly List<LineRenderer> outlineLines = new List<LineRenderer>();
     private bool isMenuOpen;
     private bool isCraftingOpen;
+    private bool isHighlighted;
     private string message = "";
     private float messageTimer;
     private Texture2D craftingBoardTexture;
+    private Material outlineMaterial;
     private CraftingDragSource craftingDragSource = CraftingDragSource.None;
     private PlayerInventory.InventorySlot draggedCraftingItem;
     private PlayerInventory.InventorySlot draggedBackpackItem;
@@ -44,6 +50,7 @@ public class PlayerHome : MonoBehaviour
     private void Update()
     {
         ResolveReferences();
+        UpdateHighlight();
 
         if (messageTimer > 0f)
         {
@@ -67,6 +74,11 @@ public class PlayerHome : MonoBehaviour
         {
             SetMenuOpen(false);
         }
+    }
+
+    private void OnDisable()
+    {
+        SetHighlighted(false);
     }
 
     public bool IsPlayerInRange()
@@ -191,6 +203,22 @@ public class PlayerHome : MonoBehaviour
         }
 
         ShowMessage("You slept. Detector battery refilled.");
+    }
+
+    public void EnterHomeInterior()
+    {
+        ResolveReferences();
+
+        if (player == null)
+        {
+            ShowMessage("No player found.");
+            return;
+        }
+
+        Vector3 returnPosition = player.position;
+        Quaternion returnRotation = player.rotation;
+        SetMenuOpen(false);
+        SceneTransitionManager.EnterHomeInterior(returnPosition, returnRotation);
     }
 
     public List<PlayerInventory.InventorySlot> ExportStoredItems()
@@ -455,6 +483,129 @@ public class PlayerHome : MonoBehaviour
         }
     }
 
+    private void UpdateHighlight()
+    {
+        SetHighlighted(IsPlayerInRange() && !GameUIState.AnyMenuOpen);
+    }
+
+    private void SetHighlighted(bool highlighted)
+    {
+        if (isHighlighted == highlighted)
+        {
+            return;
+        }
+
+        isHighlighted = highlighted;
+
+        if (highlightRenderers == null || highlightRenderers.Length == 0)
+        {
+            return;
+        }
+
+        EnsureOutline();
+
+        foreach (LineRenderer outlineLine in outlineLines)
+        {
+            if (outlineLine != null)
+            {
+                outlineLine.enabled = highlighted;
+            }
+        }
+    }
+
+    private void EnsureOutline()
+    {
+        if (outlineLines.Count > 0)
+        {
+            return;
+        }
+
+        Bounds bounds = GetHighlightBounds();
+        Vector3 min = bounds.min;
+        Vector3 max = bounds.max;
+        Vector3[] corners =
+        {
+            new Vector3(min.x, min.y, min.z),
+            new Vector3(max.x, min.y, min.z),
+            new Vector3(max.x, max.y, min.z),
+            new Vector3(min.x, max.y, min.z),
+            new Vector3(min.x, min.y, max.z),
+            new Vector3(max.x, min.y, max.z),
+            new Vector3(max.x, max.y, max.z),
+            new Vector3(min.x, max.y, max.z),
+        };
+
+        int[,] edges =
+        {
+            { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 },
+            { 4, 5 }, { 5, 6 }, { 6, 7 }, { 7, 4 },
+            { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 },
+        };
+
+        Shader shader = Shader.Find("Sprites/Default") ?? Shader.Find("Universal Render Pipeline/Unlit");
+
+        if (shader != null)
+        {
+            outlineMaterial = new Material(shader)
+            {
+                name = "Home Door Outline Material",
+            };
+        }
+
+        for (int i = 0; i < edges.GetLength(0); i++)
+        {
+            GameObject lineObject = new GameObject("Home Door Outline");
+            lineObject.transform.SetParent(transform, true);
+
+            LineRenderer lineRenderer = lineObject.AddComponent<LineRenderer>();
+            lineRenderer.enabled = false;
+            lineRenderer.useWorldSpace = true;
+            lineRenderer.positionCount = 2;
+            lineRenderer.SetPosition(0, corners[edges[i, 0]]);
+            lineRenderer.SetPosition(1, corners[edges[i, 1]]);
+            lineRenderer.startColor = highlightColor;
+            lineRenderer.endColor = highlightColor;
+            lineRenderer.startWidth = 0.045f;
+            lineRenderer.endWidth = 0.045f;
+            lineRenderer.numCapVertices = 2;
+            lineRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            lineRenderer.receiveShadows = false;
+
+            if (outlineMaterial != null)
+            {
+                lineRenderer.sharedMaterial = outlineMaterial;
+            }
+
+            outlineLines.Add(lineRenderer);
+        }
+    }
+
+    private Bounds GetHighlightBounds()
+    {
+        bool hasBounds = false;
+        Bounds bounds = new Bounds(transform.position, Vector3.one);
+
+        foreach (Renderer renderer in highlightRenderers)
+        {
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+                continue;
+            }
+
+            bounds.Encapsulate(renderer.bounds);
+        }
+
+        bounds.Expand(0.08f);
+        return bounds;
+    }
+
     private void DrawHomeMenu()
     {
         if (isCraftingOpen)
@@ -463,7 +614,7 @@ public class PlayerHome : MonoBehaviour
             return;
         }
 
-        Rect panel = new Rect(Screen.width * 0.5f - 220f, Screen.height * 0.5f - 163f, 440f, 326f);
+        Rect panel = new Rect(Screen.width * 0.5f - 220f, Screen.height * 0.5f - 186f, 440f, 372f);
         GameGui.DrawPanel(panel, "Home");
 
         int backpackCount = playerInventory != null ? playerInventory.items.Count : 0;
@@ -495,6 +646,11 @@ public class PlayerHome : MonoBehaviour
             OpenCrafting();
         }
 
+        if (GameGui.Button(new Rect(panel.x + 18f, panel.y + 296f, panel.width - 36f, 38f), "Enter house"))
+        {
+            EnterHomeInterior();
+        }
+
         string footerText = messageTimer > 0f ? message : "ESC - Close";
 
         if (teamSleepActive && coop.HasTeamSleepVote && !string.IsNullOrEmpty(coop.TeamSleepStatusText))
@@ -502,7 +658,7 @@ public class PlayerHome : MonoBehaviour
             footerText = coop.TeamSleepStatusText;
         }
 
-        GUI.Label(new Rect(panel.x + 18f, panel.y + 294f, panel.width - 36f, 22f), footerText, GameGui.HintStyle);
+        GUI.Label(new Rect(panel.x + 18f, panel.y + 340f, panel.width - 36f, 22f), footerText, GameGui.HintStyle);
     }
 
     private void DrawCraftingMenu()
@@ -869,184 +1025,156 @@ public class PlayerHome : MonoBehaviour
 public static class PlayerHomeBootstrapper
 {
     private const string HomeRootName = "Player Home";
-    private static readonly Vector2 HomePosition = new Vector2(-700f, -710f);
+    private const string InteractionPointName = "Home Door Interaction Point";
+    private const string PromptAnchorName = "Home Door Prompt Anchor";
+    private static readonly string[] PreferredDoorNames = { "Door (1)", "house door", "House Door", "Door" };
 
     public static void EnsurePlayerHome()
     {
-        if (Object.FindAnyObjectByType<PlayerHome>() != null || GameObject.Find(HomeRootName) != null)
+        Transform homeDoor = FindHomeDoor();
+
+        if (homeDoor == null)
+        {
+            DestroyProceduralHomeIfPresent(null);
+            return;
+        }
+
+        PlayerHome existingHome = Object.FindAnyObjectByType<PlayerHome>();
+        List<PlayerInventory.InventorySlot> existingStoredItems = existingHome != null ? existingHome.ExportStoredItems() : null;
+        PlayerHome home = homeDoor.GetComponent<PlayerHome>();
+
+        if (home == null)
+        {
+            home = homeDoor.gameObject.AddComponent<PlayerHome>();
+        }
+
+        ConfigureDoorHome(home, homeDoor);
+
+        if (existingStoredItems != null && existingHome != home)
+        {
+            home.ImportStoredItems(existingStoredItems);
+        }
+
+        DestroyProceduralHomeIfPresent(home);
+    }
+
+    private static Transform FindHomeDoor()
+    {
+        Transform[] transforms = Object.FindObjectsByType<Transform>(FindObjectsInactive.Include);
+
+        foreach (string preferredDoorName in PreferredDoorNames)
+        {
+            foreach (Transform transform in transforms)
+            {
+                if (transform == null || !IsMainWorldSceneObject(transform.gameObject) || transform.name != preferredDoorName)
+                {
+                    continue;
+                }
+
+                return transform;
+            }
+        }
+
+        foreach (Transform transform in transforms)
+        {
+            if (transform == null || !IsMainWorldSceneObject(transform.gameObject))
+            {
+                continue;
+            }
+
+            if (string.Equals(transform.name, "house door", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return transform;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsMainWorldSceneObject(GameObject gameObject)
+    {
+        Scene scene = gameObject.scene;
+        return scene.IsValid() && scene.name == SceneTransitionManager.MainWorldSceneName;
+    }
+
+    private static void ConfigureDoorHome(PlayerHome home, Transform homeDoor)
+    {
+        Renderer[] renderers = homeDoor.GetComponentsInChildren<Renderer>(true);
+        Bounds bounds = GetRendererBounds(renderers, homeDoor.position);
+        home.interactionPoint = EnsureMarker(homeDoor, InteractionPointName, homeDoor.InverseTransformPoint(bounds.center));
+        home.promptAnchor = EnsureMarker(homeDoor, PromptAnchorName, homeDoor.InverseTransformPoint(bounds.center + Vector3.up * 0.9f));
+        home.interactionDistance = 4.5f;
+        home.highlightRenderers = renderers;
+        home.highlightColor = new Color(0.2f, 1f, 0.35f, 1f);
+    }
+
+    private static Transform EnsureMarker(Transform parent, string name, Vector3 localPosition)
+    {
+        Transform marker = parent.Find(name);
+
+        if (marker == null)
+        {
+            GameObject markerObject = new GameObject(name);
+            markerObject.transform.SetParent(parent, false);
+            marker = markerObject.transform;
+        }
+
+        marker.localPosition = localPosition;
+        marker.localRotation = Quaternion.identity;
+        marker.localScale = Vector3.one;
+        return marker;
+    }
+
+    private static Bounds GetRendererBounds(Renderer[] renderers, Vector3 fallbackPosition)
+    {
+        bool hasBounds = false;
+        Bounds bounds = new Bounds(fallbackPosition, Vector3.one);
+
+        foreach (Renderer renderer in renderers)
+        {
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                bounds = renderer.bounds;
+                hasBounds = true;
+                continue;
+            }
+
+            bounds.Encapsulate(renderer.bounds);
+        }
+
+        return bounds;
+    }
+
+    private static void DestroyProceduralHomeIfPresent(PlayerHome keepHome)
+    {
+        GameObject proceduralHome = GameObject.Find(HomeRootName);
+
+        if (proceduralHome == null || (keepHome != null && proceduralHome == keepHome.gameObject))
         {
             return;
         }
 
-        CreateHome();
+        DestroyGameObject(proceduralHome);
     }
 
-    private static void CreateHome()
+    private static void DestroyGameObject(GameObject target)
     {
-        float groundY = GetGroundY(HomePosition.x, HomePosition.y);
-        GameObject homeObject = new GameObject(HomeRootName);
-        homeObject.transform.position = new Vector3(HomePosition.x, groundY, HomePosition.y);
-        homeObject.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
-
-        Material wallMaterial = CreateMaterial(new Color(0.46f, 0.28f, 0.14f, 1f));
-        Material trimMaterial = CreateMaterial(new Color(0.28f, 0.16f, 0.08f, 1f));
-        Material roofMaterial = CreateMaterial(new Color(0.22f, 0.09f, 0.055f, 1f));
-        Material floorMaterial = CreateMaterial(new Color(0.36f, 0.29f, 0.2f, 1f));
-        Material bedMaterial = CreateMaterial(new Color(0.58f, 0.18f, 0.15f, 1f));
-        Material chestMaterial = CreateMaterial(new Color(0.52f, 0.32f, 0.13f, 1f));
-
-        CreateCube(homeObject.transform, "Foundation", new Vector3(0f, 0.18f, 0f), Vector3.zero, new Vector3(8.6f, 0.36f, 6.3f), floorMaterial);
-        CreateCube(homeObject.transform, "Back Wall", new Vector3(0f, 1.85f, 3f), Vector3.zero, new Vector3(8.4f, 3.25f, 0.28f), wallMaterial);
-        CreateCube(homeObject.transform, "Left Wall", new Vector3(-4.05f, 1.85f, 0f), Vector3.zero, new Vector3(0.28f, 3.25f, 6f), wallMaterial);
-        CreateCube(homeObject.transform, "Right Wall", new Vector3(4.05f, 1.85f, 0f), Vector3.zero, new Vector3(0.28f, 3.25f, 6f), wallMaterial);
-        CreateCube(homeObject.transform, "Front Wall Left", new Vector3(-2.45f, 1.85f, -3f), Vector3.zero, new Vector3(3.2f, 3.25f, 0.28f), wallMaterial);
-        CreateCube(homeObject.transform, "Front Wall Right", new Vector3(2.45f, 1.85f, -3f), Vector3.zero, new Vector3(3.2f, 3.25f, 0.28f), wallMaterial);
-        CreateCube(homeObject.transform, "Door Frame Top", new Vector3(0f, 3.25f, -3f), Vector3.zero, new Vector3(1.65f, 0.45f, 0.3f), trimMaterial);
-        CreateCube(homeObject.transform, "Door", new Vector3(0f, 1.38f, -3.16f), Vector3.zero, new Vector3(1.25f, 2.25f, 0.12f), trimMaterial);
-
-        CreateCube(homeObject.transform, "Roof Left", new Vector3(-2.05f, 3.75f, 0f), new Vector3(0f, 0f, -24f), new Vector3(4.9f, 0.3f, 6.9f), roofMaterial);
-        CreateCube(homeObject.transform, "Roof Right", new Vector3(2.05f, 3.75f, 0f), new Vector3(0f, 0f, 24f), new Vector3(4.9f, 0.3f, 6.9f), roofMaterial);
-        CreateCube(homeObject.transform, "Roof Ridge", new Vector3(0f, 4.72f, 0f), Vector3.zero, new Vector3(0.35f, 0.25f, 6.95f), roofMaterial);
-
-        CreateCube(homeObject.transform, "Storage Chest", new Vector3(2.35f, 0.82f, -3.85f), Vector3.zero, new Vector3(1.6f, 0.9f, 0.95f), chestMaterial);
-        CreateCube(homeObject.transform, "Chest Lid", new Vector3(2.35f, 1.34f, -3.85f), Vector3.zero, new Vector3(1.7f, 0.18f, 1.05f), trimMaterial);
-        CreateCube(homeObject.transform, "Bed", new Vector3(-2.35f, 0.72f, -3.82f), Vector3.zero, new Vector3(1.75f, 0.45f, 2.45f), bedMaterial);
-        CreateCube(homeObject.transform, "Pillow", new Vector3(-2.35f, 1.05f, -4.55f), Vector3.zero, new Vector3(1.35f, 0.24f, 0.46f), CreateMaterial(new Color(0.86f, 0.78f, 0.62f, 1f)));
-
-        Transform promptAnchor = CreateMarker(homeObject.transform, "Prompt Anchor", new Vector3(0f, 2.2f, -4.2f));
-        Transform interactionPoint = CreateMarker(homeObject.transform, "Interaction Point", new Vector3(0f, 1f, -4.2f));
-
-        CreateText(homeObject.transform, "HOME", new Vector3(0f, 3.25f, -3.25f), Quaternion.Euler(0f, 180f, 0f));
-
-        PlayerHome home = homeObject.AddComponent<PlayerHome>();
-        home.interactionPoint = interactionPoint;
-        home.promptAnchor = promptAnchor;
-        home.interactionDistance = 5.2f;
-
-        Debug.Log("Created provisional player home at " + homeObject.transform.position + ".");
-    }
-
-    private static GameObject CreateCube(Transform parent, string name, Vector3 localPosition, Vector3 localEulerAngles, Vector3 localScale, Material material)
-    {
-        GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        cube.name = name;
-        cube.transform.SetParent(parent, false);
-        cube.transform.localPosition = localPosition;
-        cube.transform.localRotation = Quaternion.Euler(localEulerAngles);
-        cube.transform.localScale = localScale;
-        SetMaterial(cube, material);
-        DisableCollider(cube);
-        return cube;
-    }
-
-    private static Transform CreateMarker(Transform parent, string name, Vector3 localPosition)
-    {
-        GameObject marker = new GameObject(name);
-        marker.transform.SetParent(parent, false);
-        marker.transform.localPosition = localPosition;
-        return marker.transform;
-    }
-
-    private static void CreateText(Transform parent, string label, Vector3 localPosition, Quaternion localRotation)
-    {
-        GameObject textObject = new GameObject("Home Label");
-        textObject.transform.SetParent(parent, false);
-        textObject.transform.localPosition = localPosition;
-        textObject.transform.localRotation = localRotation;
-
-        TextMesh text = textObject.AddComponent<TextMesh>();
-        text.text = label;
-        text.anchor = TextAnchor.MiddleCenter;
-        text.alignment = TextAlignment.Center;
-        text.characterSize = 0.26f;
-        text.fontSize = 80;
-        text.color = new Color(0.98f, 0.9f, 0.62f, 1f);
-    }
-
-    private static float GetGroundY(float worldX, float worldZ)
-    {
-        Terrain terrain = GetTerrainAt(worldX, worldZ);
-
-        if (terrain == null)
+        if (target == null)
         {
-            return 51.08f;
+            return;
         }
 
-        Vector3 terrainPosition = terrain.transform.position;
-        Vector3 terrainSize = terrain.terrainData.size;
-        float normalizedX = Mathf.InverseLerp(terrainPosition.x, terrainPosition.x + terrainSize.x, worldX);
-        float normalizedZ = Mathf.InverseLerp(terrainPosition.z, terrainPosition.z + terrainSize.z, worldZ);
-        return terrainPosition.y + terrain.terrainData.GetInterpolatedHeight(normalizedX, normalizedZ);
-    }
-
-    private static Terrain GetTerrainAt(float worldX, float worldZ)
-    {
-        foreach (Terrain terrain in Terrain.activeTerrains)
+        if (Application.isPlaying)
         {
-            if (terrain != null && IsInsideTerrain(terrain, worldX, worldZ))
-            {
-                return terrain;
-            }
+            Object.Destroy(target);
+            return;
         }
 
-        Terrain activeTerrain = Terrain.activeTerrain;
-        return activeTerrain != null && IsInsideTerrain(activeTerrain, worldX, worldZ) ? activeTerrain : null;
-    }
-
-    private static bool IsInsideTerrain(Terrain terrain, float worldX, float worldZ)
-    {
-        Vector3 terrainPosition = terrain.transform.position;
-        Vector3 terrainSize = terrain.terrainData.size;
-        return worldX >= terrainPosition.x
-            && worldX <= terrainPosition.x + terrainSize.x
-            && worldZ >= terrainPosition.z
-            && worldZ <= terrainPosition.z + terrainSize.z;
-    }
-
-    private static Material CreateMaterial(Color color)
-    {
-        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-
-        if (shader == null)
-        {
-            shader = Shader.Find("Standard");
-        }
-
-        Material material = new Material(shader)
-        {
-            color = color
-        };
-
-        if (material.HasProperty("_BaseColor"))
-        {
-            material.SetColor("_BaseColor", color);
-        }
-
-        if (material.HasProperty("_Smoothness"))
-        {
-            material.SetFloat("_Smoothness", 0.22f);
-        }
-
-        return material;
-    }
-
-    private static void SetMaterial(GameObject target, Material material)
-    {
-        Renderer renderer = target.GetComponent<Renderer>();
-
-        if (renderer != null)
-        {
-            renderer.material = material;
-        }
-    }
-
-    private static void DisableCollider(GameObject target)
-    {
-        Collider collider = target.GetComponent<Collider>();
-
-        if (collider != null)
-        {
-            collider.enabled = false;
-        }
+        Object.DestroyImmediate(target);
     }
 }
