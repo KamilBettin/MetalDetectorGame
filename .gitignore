@@ -105,3 +105,19 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# Local Codex/assistant workspace data and backups
+/.codex/
+/.agents/
+
+# Local Steam development app id. Keep this file locally for Steam testing,
+# but do not publish it in the repository.
+/steam_appid.txt
+
+# Local secrets and machine-specific config
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+*.keystore
