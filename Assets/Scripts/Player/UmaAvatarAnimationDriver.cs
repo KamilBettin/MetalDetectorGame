@@ -258,7 +258,7 @@ public class UmaAvatarAnimationDriver : MonoBehaviour
 
     private bool IsScanInputHeld()
     {
-        return useLocalScanInputForSteadyPose && !GameUIState.AnyMenuOpen && Mouse.current != null && Mouse.current.leftButton.isPressed;
+        return useLocalScanInputForSteadyPose && !GameUIState.AnyBlockingUIOpen && Mouse.current != null && Mouse.current.leftButton.isPressed;
     }
 
     private static void ApplyPoseBlend(BonePose[] poses, float animationWeight)

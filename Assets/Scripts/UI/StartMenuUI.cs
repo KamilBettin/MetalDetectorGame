@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
@@ -19,6 +20,7 @@ public class StartMenuUI : MonoBehaviour
     private int selectedIndex;
     private int hoveredIndex = -1;
     private float messageTimer;
+    private bool isLaunchingGame;
     private readonly string[] menuItems = { "New Game", "Continue", "Multiplayer", "Settings", "Quit" };
 
     public static void AllowShowingAgain()
@@ -35,6 +37,7 @@ public class StartMenuUI : MonoBehaviour
         }
 
         hasShownThisSession = true;
+        LoadingScreenUI.ForceHide();
         BuildCanvas();
         SetMenuOpen(true);
     }
@@ -215,19 +218,20 @@ public class StartMenuUI : MonoBehaviour
 
     private void ActivateItem(int itemIndex)
     {
+        if (isLaunchingGame)
+        {
+            return;
+        }
+
         SetSelected(itemIndex);
 
         switch (itemIndex)
         {
             case 0:
-                GameSaveSystem.StartNewGame();
-                CloseMenu();
-                IntroLetterUI.Show();
+                StartCoroutine(LaunchNewGameRoutine());
                 break;
             case 1:
-                GameSaveSystem.ContinueGame(out string continueMessage);
-                ShowMessage(continueMessage);
-                CloseMenu();
+                StartCoroutine(LaunchContinueRoutine());
                 break;
             case 2:
                 ShowMultiplayerPanel();
@@ -239,6 +243,38 @@ public class StartMenuUI : MonoBehaviour
                 QuitGame();
                 break;
         }
+    }
+
+    private IEnumerator LaunchNewGameRoutine()
+    {
+        isLaunchingGame = true;
+        LoadingScreenUI.Show("Loading island", 2.85f);
+        yield return null;
+
+        GameSaveSystem.StartNewGame();
+        LoadingScreenUI.HideAfterMinimum(0.25f);
+        CloseMenu();
+        IntroLetterUI.Show();
+    }
+
+    private IEnumerator LaunchContinueRoutine()
+    {
+        isLaunchingGame = true;
+        LoadingScreenUI.Show("Loading save", 2.75f);
+        yield return null;
+
+        bool loaded = GameSaveSystem.ContinueGame(out string continueMessage);
+
+        if (!loaded)
+        {
+            isLaunchingGame = false;
+            LoadingScreenUI.HideAfterMinimum(0.1f);
+            ShowMessage(continueMessage);
+            yield break;
+        }
+
+        LoadingScreenUI.HideAfterMinimum(0.25f);
+        CloseMenu();
     }
 
     private void CloseMenu()

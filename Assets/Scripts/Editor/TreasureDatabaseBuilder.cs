@@ -35,35 +35,66 @@ public static class TreasureDatabaseBuilder
         }
 
         List<TreasureDefinition> treasures = new List<TreasureDefinition>();
+        List<TreasureDefinition> iconOnlyTreasures = new List<TreasureDefinition>();
 
         foreach (string iconPath in iconPaths)
         {
             EnsureSpriteImporter(iconPath);
 
             Sprite icon = AssetDatabase.LoadAssetAtPath<Sprite>(iconPath);
+
+            if (icon == null)
+            {
+                continue;
+            }
+
             string rawName = Path.GetFileNameWithoutExtension(iconPath);
+
+            if (IsExcludedTreasureRawName(rawName))
+            {
+                continue;
+            }
+
             string displayName = ToDisplayName(rawName);
-            TreasureRarity rarity = GuessRarity(rawName);
+            bool isCraftingIngredient = IsCraftingIngredientRawName(rawName);
+            TreasureRarity rarity = isCraftingIngredient ? TreasureRarity.Common : GuessRarity(rawName);
             Vector2Int size = UseAutomaticInventorySizes
                 ? GuessInventorySize(rawName, GetOpaqueAspect(iconPath))
                 : Vector2Int.one;
-            int value = GuessValue(rawName, rarity, size);
+            int value = isCraftingIngredient ? GuessCraftingIngredientValue(rawName) : GuessValue(rawName, rarity, size);
 
-            treasures.Add(new TreasureDefinition
+            TreasureDefinition treasure = new TreasureDefinition
             {
                 treasureName = displayName,
                 value = value,
                 rarity = rarity,
                 icon = icon,
-                spawnWeight = GuessSpawnWeight(rarity, value),
+                spawnWeight = isCraftingIngredient ? GuessCraftingIngredientSpawnWeight(rawName) : GuessSpawnWeight(rarity, value),
                 width = size.x,
                 height = size.y,
-                minDigHits = Mathf.Clamp(size.x + size.y, 2, 6),
-                maxDigHits = Mathf.Clamp(size.x + size.y + (rarity == TreasureRarity.Epic ? 3 : 2), 3, 9)
-            });
+                minDigHits = isCraftingIngredient ? 2 : Mathf.Clamp(size.x + size.y, 2, 6),
+                maxDigHits = isCraftingIngredient ? 4 : Mathf.Clamp(size.x + size.y + (rarity == TreasureRarity.Epic ? 3 : 2), 3, 9)
+            };
+
+            if (IsIconOnlyTreasureRawName(rawName))
+            {
+                iconOnlyTreasures.Add(treasure);
+                continue;
+            }
+
+            treasures.Add(treasure);
         }
 
+        database.defaultTreasures = treasures.Where(IsDefaultTreasure).ToArray();
+        database.defaultPlusOneUpgradeTreasures = treasures.Where(IsUpgradeOneTreasure).ToArray();
+        database.defaultPlusTwoUpgradeTreasures = treasures.Where(IsUpgradeTwoTreasure).ToArray();
+        database.defaultPlusThreeUpgradeTreasures = treasures.Where(IsUpgradeThreeTreasure).ToArray();
+        database.specialFieldTreasures = treasures.Where(IsSpecialFieldTreasure).ToArray();
+        database.specialTreeFieldTreasures = treasures.Where(IsSpecialTreeFieldTreasure).ToArray();
+        database.iconOnlyTreasures = iconOnlyTreasures.ToArray();
         database.treasures = treasures.ToArray();
+        database.generalTerrainTreasures = database.defaultTreasures;
+        database.searchAreaTreasures = database.specialFieldTreasures;
         EditorUtility.SetDirty(database);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
@@ -255,10 +286,268 @@ public static class TreasureDatabaseBuilder
         return Mathf.Clamp(weight - value / 80, 1, 40);
     }
 
+    private static bool IsDefaultTreasure(TreasureDefinition treasure)
+    {
+        return treasure != null && treasure.rarity == TreasureRarity.Common && treasure.value <= 20;
+    }
+
+    private static bool IsUpgradeOneTreasure(TreasureDefinition treasure)
+    {
+        return treasure != null && treasure.value > 20 && treasure.value <= 70 && !IsSpecialFieldTreasure(treasure);
+    }
+
+    private static bool IsUpgradeTwoTreasure(TreasureDefinition treasure)
+    {
+        return treasure != null && treasure.value > 70 && treasure.value <= 140 && !IsSpecialFieldTreasure(treasure);
+    }
+
+    private static bool IsUpgradeThreeTreasure(TreasureDefinition treasure)
+    {
+        return treasure != null && treasure.value > 140 && !IsSpecialFieldTreasure(treasure);
+    }
+
+    private static bool IsSpecialFieldTreasure(TreasureDefinition treasure)
+    {
+        if (treasure == null)
+        {
+            return false;
+        }
+
+        string normalizedName = ToSnakeCase(treasure.treasureName);
+        return normalizedName == "medallion"
+            || normalizedName == "cross_pendant"
+            || normalizedName == "heart_pendant"
+            || normalizedName == "metal_map_case_fragment"
+            || normalizedName == "small_spyglass_tube"
+            || normalizedName == "ornate_document_tube"
+            || normalizedName == "time_capsule"
+            || normalizedName == "decorative_metal_shell"
+            || normalizedName == "old_metal_seal"
+            || normalizedName == "wax_seal_with_metal_rim"
+            || normalizedName == "jewelry_box";
+    }
+
+    private static bool IsSpecialTreeFieldTreasure(TreasureDefinition treasure)
+    {
+        return treasure != null
+            && (treasure.rarity == TreasureRarity.Epic
+                || ContainsAny(ToSnakeCase(treasure.treasureName), "amulet", "relic", "idol", "scarab", "runed", "crown", "compass", "token", "pendant"));
+    }
+
+    private static bool IsExcludedTreasureRawName(string rawName)
+    {
+        if (rawName.Contains("key"))
+        {
+            return true;
+        }
+
+        return ContainsAny(
+            rawName,
+            "fantasy",
+            "talisman",
+            "rune_amulet",
+            "runed_ring",
+            "moon_amulet",
+            "sun_amulet",
+            "star_amulet",
+            "scarab",
+            "idol",
+            "mysterious",
+            "bicycle",
+            "brake_fragment",
+            "metal_sleeve",
+            "spring",
+            "old_watch_fragment",
+            "watch_dial",
+            "watch_hands",
+            "watch_crown",
+            "clock_gear",
+            "small_cog",
+            "metal_watch_band",
+            "pull_tab",
+            "aluminum_foil_ball",
+            "soda_can_pull_tab",
+            "rusty_screw",
+            "safety_pin",
+            "metal_hair_clip",
+            "metal_zipper",
+            "metal_washer",
+            "nut",
+            "sheet_metal_fragment",
+            "brass_plaque",
+            "numbered_metal_tag",
+            "badge_pin",
+            "fishing_sinker",
+            "fishing_swivel",
+            "fishing_bell",
+            "metal_fishing_float",
+            "beach_umbrella_part",
+            "tent_peg",
+            "backpack_buckle",
+            "leash_carabiner",
+            "bag_zipper_piece",
+            "bag_metal_logo",
+            "sunglasses_part",
+            "wallet_metal_plate",
+            "jeans_button",
+            "pants_rivet",
+            "collar_bell",
+            "metal_pawn",
+            "metal_die",
+            "sun_symbol_plate",
+            "metal_plate",
+            "metal_lighter",
+            "small_screwdriver",
+            "old_hammer",
+            "small_chisel",
+            "saw_fragment",
+            "metal_file",
+            "old_forged_nail",
+            "old_hinge",
+            "ornate_chest_fitting",
+            "small_door_handle",
+            "drawer_pull",
+            "metal_box_corner",
+            "decorative_rosette",
+            "old_latch",
+            "door_bolt",
+            "harness_buckle",
+            "horse_bit",
+            "old_animal_bell",
+            "harness_ring",
+            "small_saddle_buckle",
+            "decorative_stud",
+            "harness_rivet",
+            "stable_plaque",
+            "chain_fragment",
+            "worn_blank_coin",
+            "coin_with_hole",
+            "crown_token",
+            "anchor_token",
+            "map_token",
+            "cylindrical_metal_container",
+            "wing_screw",
+            "large_head_screw",
+            "metal_ball",
+            "small_gear_wheel",
+            "old_valve",
+            "wing_nut",
+            "decorative_button",
+            "belt_buckle",
+            "metal_shell_casing",
+            "dog_tag",
+            "old_shoe_buckle",
+            "small_padlock",
+            "old_scissors",
+            "closed_pocket_knife",
+            "old_table_knife",
+            "small_sheathed_fishing_knife",
+            "metal_screw_cap",
+            "bottle_opener",
+            "cigarette_case",
+            "small_flask",
+            "old_metal_frame_glasses",
+            "crushed_can",
+            "metal_mug",
+            "old_tin_can",
+            "sports_medal",
+            "old_commemorative_medal",
+            "small_bell",
+            "metal_animal_figurine",
+            "mini_alarm_clock",
+            "old_toy_car",
+            "chest_lock",
+            "ball_bearing",
+            "plain_military_button",
+            "lead_seal",
+            "merchant_weight",
+            "carabiner",
+            "metal_clamp",
+            "rusty_open_end_wrench",
+            "small_adjustable_wrench",
+            "gold_ring_with_red_stone",
+            "signet_ring",
+            "ring_with_green_stone",
+            "ring_with_blue_stone",
+            "crest_signet_ring"
+        );
+    }
+
+    private static bool IsIconOnlyTreasureRawName(string rawName)
+    {
+        string normalizedName = Regex.Replace(rawName, @"^\d+_", "");
+        return normalizedName == "pocket_watch"
+            || normalizedName == "horseshoe"
+            || normalizedName == "compass"
+            || normalizedName == "bracelet"
+            || normalizedName == "closed_portrait_locket";
+    }
+
+    private static bool IsCraftingIngredientRawName(string rawName)
+    {
+        string normalizedName = Regex.Replace(rawName, @"^\d+_", "");
+        return normalizedName == "watch_fragment"
+            || normalizedName == "watch_case"
+            || normalizedName == "horseshoe_fragment"
+            || normalizedName == "metal_rod"
+            || normalizedName == "old_cracked_compass"
+            || normalizedName == "broken_chain"
+            || normalizedName == "chain_piece"
+            || normalizedName == "chain_link"
+            || normalizedName == "cracked_glass_locket"
+            || normalizedName == "metal_photo_frame";
+    }
+
+    private static int GuessCraftingIngredientValue(string rawName)
+    {
+        string normalizedName = Regex.Replace(rawName, @"^\d+_", "");
+
+        if (normalizedName == "watch_case"
+            || normalizedName == "old_cracked_compass"
+            || normalizedName == "cracked_glass_locket")
+        {
+            return 14;
+        }
+
+        if (normalizedName == "watch_fragment"
+            || normalizedName == "horseshoe_fragment"
+            || normalizedName == "metal_photo_frame")
+        {
+            return 10;
+        }
+
+        return 8;
+    }
+
+    private static int GuessCraftingIngredientSpawnWeight(string rawName)
+    {
+        string normalizedName = Regex.Replace(rawName, @"^\d+_", "");
+
+        if (normalizedName == "watch_case"
+            || normalizedName == "old_cracked_compass"
+            || normalizedName == "cracked_glass_locket")
+        {
+            return 28;
+        }
+
+        if (normalizedName == "horseshoe_fragment"
+            || normalizedName == "metal_photo_frame")
+        {
+            return 30;
+        }
+
+        return 34;
+    }
+
     private static int ExtractLeadingNumber(string rawName)
     {
         Match match = Regex.Match(rawName, @"^(\d+)_");
         return match.Success && int.TryParse(match.Groups[1].Value, out int number) ? number : 0;
+    }
+
+    private static string ToSnakeCase(string displayName)
+    {
+        return string.IsNullOrEmpty(displayName) ? string.Empty : displayName.ToLowerInvariant().Replace(' ', '_');
     }
 
     private static bool ContainsAny(string value, params string[] needles)

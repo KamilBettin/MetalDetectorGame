@@ -9,7 +9,9 @@ public static class GameUIState
     public static bool IsQuestMenuOpen { get; private set; }
     public static bool IsHomeMenuOpen { get; private set; }
     public static bool IsIntroLetterOpen { get; private set; }
+    public static bool IsConfirmationOpen { get; private set; }
     public static bool AnyMenuOpen => IsStartMenuOpen || IsPauseMenuOpen || IsInventoryOpen || IsTraderMenuOpen || IsQuestMenuOpen || IsHomeMenuOpen || IsIntroLetterOpen;
+    public static bool AnyBlockingUIOpen => AnyMenuOpen || IsConfirmationOpen;
 
     public static void SetStartMenuOpen(bool isOpen)
     {
@@ -53,9 +55,15 @@ public static class GameUIState
         RefreshCursor();
     }
 
+    public static void SetConfirmationOpen(bool isOpen)
+    {
+        IsConfirmationOpen = isOpen;
+        RefreshCursor();
+    }
+
     private static void RefreshCursor()
     {
-        if (AnyMenuOpen)
+        if (AnyBlockingUIOpen)
         {
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;

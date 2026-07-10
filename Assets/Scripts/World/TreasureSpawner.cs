@@ -12,6 +12,13 @@ public class TreasureSpawner : MonoBehaviour
     public int treasureCount = 80;
     public int treasuresPerUnlockedArea = 120;
     public int generalTerrainTreasureCount = 180;
+    public bool scaleTreasureCountToFindableItems = true;
+    public int minimumGeneralTerrainTreasureCount = 180;
+    public int generalTerrainTreasureMultiplier = 5;
+    public bool focusGeneralTerrainAroundPlayer = true;
+    public float generalTerrainSpawnRadius = 460f;
+    public bool requireGeneralTerrainOnDryLand = true;
+    public float maxGeneralTerrainWaterDepth = 0.35f;
     public int maxGeneralSpawnAttemptsPerTreasure = 24;
     public int deterministicSeed = 420777;
     public Vector2 mapSize = new Vector2(1000f, 1000f);
@@ -23,22 +30,24 @@ public class TreasureSpawner : MonoBehaviour
     public float searchAreaCornerSize = 1.8f;
     public bool snapTreasuresToTerrain = true;
     public float buriedDepth = 0.22f;
+    public TreasureLootPool generalTerrainLootPool = TreasureLootPool.Default;
 
     private GameObject searchAreaMarkerParent;
     private Material searchAreaLineMaterial;
     private Material searchAreaCornerMaterial;
     private int nextTreasureId;
+    private MetalDetector metalDetector;
+    private OceanWaterSurface waterSurface;
 
     public TreasureDatabase treasureDatabase;
 
     public TreasureOption[] treasureOptions =
     {
-        new TreasureOption { treasureName = "Rusty Bottle Cap", value = 1 },
-        new TreasureOption { treasureName = "Old Nail", value = 2 },
+        new TreasureOption { treasureName = "Rusty Bottle Cap", value = 3 },
+        new TreasureOption { treasureName = "Old Nail", value = 3 },
         new TreasureOption { treasureName = "Small Coin", value = 8 },
-        new TreasureOption { treasureName = "Lost Key", value = 14 },
-        new TreasureOption { treasureName = "Silver Ring", value = 45 },
-        new TreasureOption { treasureName = "Gold Ring", value = 120 }
+        new TreasureOption { treasureName = "Silver Ring", value = 60 },
+        new TreasureOption { treasureName = "Gold Ring", value = 210 }
     };
 
     private void Start()
@@ -62,7 +71,7 @@ public class TreasureSpawner : MonoBehaviour
         }
 
         EnsureTreasureDatabase();
-        SpawnTreasuresInArea(area, treasuresPerUnlockedArea);
+        SpawnTreasuresInArea(area, GetTreasureCountForArea(area));
         area.MarkTreasuresSpawned();
     }
 
@@ -179,7 +188,7 @@ public class TreasureSpawner : MonoBehaviour
     {
         EnsureTreasureDatabase();
 
-        if ((treasureDatabase == null || treasureDatabase.treasures == null || treasureDatabase.treasures.Length == 0)
+        if ((treasureDatabase == null || !treasureDatabase.HasAnyTreasures())
             && (treasureOptions == null || treasureOptions.Length == 0))
         {
             Debug.LogWarning("TreasureSpawner has no treasure options.");
@@ -250,16 +259,19 @@ public class TreasureSpawner : MonoBehaviour
 
     private void SpawnTreasuresInArea(SearchArea area, int count)
     {
+        TreasureLootPool areaLootPool = area != null ? area.lootPool : TreasureLootPool.SpecialField;
+        int detectorTier = GetCurrentDetectorTier();
+
         for (int i = 0; i < count; i++)
         {
-            SpawnTreasureAt(area.GetRandomPoint(buriedYPosition), TreasureLootPool.SearchArea);
+            SpawnTreasureAt(area.GetRandomPoint(buriedYPosition), areaLootPool, detectorTier);
         }
     }
 
     private void SpawnGeneralTerrainTreasures(SearchArea[] searchAreas)
     {
-        int targetCount = Mathf.Max(0, generalTerrainTreasureCount > 0 ? generalTerrainTreasureCount : treasureCount);
-        int maxAttempts = Mathf.Max(1, maxGeneralSpawnAttemptsPerTreasure);
+        int targetCount = GetGeneralTerrainTreasureCount();
+        int maxAttempts = Mathf.Max(requireGeneralTerrainOnDryLand || focusGeneralTerrainAroundPlayer ? 64 : 1, maxGeneralSpawnAttemptsPerTreasure);
 
         for (int i = 0; i < targetCount; i++)
         {
@@ -267,23 +279,44 @@ public class TreasureSpawner : MonoBehaviour
 
             for (int attempt = 0; attempt < maxAttempts; attempt++)
             {
-                Vector3 position = GetRandomLegacyPosition();
+                Vector3 position = GetRandomGeneralTerrainPosition();
 
                 if (IsInsideAnySearchArea(position, searchAreas))
                 {
                     continue;
                 }
 
-                SpawnTreasureAt(position, TreasureLootPool.GeneralTerrain);
+                if (!IsValidGeneralTerrainSpawnPosition(position))
+                {
+                    continue;
+                }
+
+                SpawnTreasureAt(position, generalTerrainLootPool);
                 spawned = true;
                 break;
             }
 
             if (!spawned && (searchAreas == null || searchAreas.Length == 0))
             {
-                SpawnTreasureAt(GetRandomLegacyPosition(), TreasureLootPool.GeneralTerrain);
+                Vector3 fallbackPosition = GetRandomGeneralTerrainPosition();
+
+                if (IsValidGeneralTerrainSpawnPosition(fallbackPosition))
+                {
+                    SpawnTreasureAt(fallbackPosition, generalTerrainLootPool);
+                }
             }
         }
+    }
+
+    private Vector3 GetRandomGeneralTerrainPosition()
+    {
+        if (focusGeneralTerrainAroundPlayer && TryGetGeneralTerrainSpawnCenter(out Vector3 center))
+        {
+            Vector2 offset = Random.insideUnitCircle * Mathf.Max(1f, generalTerrainSpawnRadius);
+            return new Vector3(center.x + offset.x, buriedYPosition, center.z + offset.y);
+        }
+
+        return GetRandomLegacyPosition();
     }
 
     private Vector3 GetRandomLegacyPosition()
@@ -313,11 +346,43 @@ public class TreasureSpawner : MonoBehaviour
         return false;
     }
 
+    private bool IsValidGeneralTerrainSpawnPosition(Vector3 position)
+    {
+        if (!requireGeneralTerrainOnDryLand)
+        {
+            return true;
+        }
+
+        Terrain terrain = GetTerrainAt(position);
+
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        float groundHeight = GetTerrainWorldHeight(terrain, position.x, position.z);
+        float waterDepth = Mathf.Max(0f, GetCurrentWaterLevel() - groundHeight);
+        return waterDepth <= Mathf.Max(0f, maxGeneralTerrainWaterDepth);
+    }
+
     private void SpawnTreasureAt(Vector3 position, TreasureLootPool lootPool)
+    {
+        SpawnTreasureAt(position, lootPool, null);
+    }
+
+    private void SpawnTreasureAt(Vector3 position, TreasureLootPool lootPool, int? detectorTier)
     {
         position = GetBuriedPosition(position);
 
-        TreasureDefinition definition = treasureDatabase != null ? treasureDatabase.GetRandomTreasure(lootPool) : null;
+        TreasureDefinition definition = null;
+
+        if (treasureDatabase != null)
+        {
+            definition = detectorTier.HasValue
+                ? treasureDatabase.GetRandomTreasureForSearchArea(lootPool, detectorTier.Value)
+                : treasureDatabase.GetRandomTreasure(lootPool);
+        }
+
         TreasureOption option = definition == null && treasureOptions != null && treasureOptions.Length > 0
             ? treasureOptions[Random.Range(0, treasureOptions.Length)]
             : null;
@@ -359,6 +424,66 @@ public class TreasureSpawner : MonoBehaviour
         {
             treasureRenderer.enabled = showDebugTreasures;
         }
+    }
+
+    private int GetCurrentDetectorTier()
+    {
+        if (metalDetector == null)
+        {
+            metalDetector = FindAnyObjectByType<MetalDetector>();
+        }
+
+        return metalDetector != null ? metalDetector.DetectorTier : 0;
+    }
+
+    private int GetTreasureCountForArea(SearchArea area)
+    {
+        if (!scaleTreasureCountToFindableItems || treasureDatabase == null)
+        {
+            return Mathf.Max(0, treasuresPerUnlockedArea);
+        }
+
+        TreasureLootPool areaLootPool = area != null ? area.lootPool : TreasureLootPool.SpecialField;
+        int findableCount = treasureDatabase.GetFindableTreasureCountForSearchArea(areaLootPool, GetCurrentDetectorTier());
+        return findableCount > 0 ? findableCount : Mathf.Max(0, treasuresPerUnlockedArea);
+    }
+
+    private int GetGeneralTerrainTreasureCount()
+    {
+        if (!scaleTreasureCountToFindableItems || treasureDatabase == null)
+        {
+            return Mathf.Max(0, generalTerrainTreasureCount > 0 ? generalTerrainTreasureCount : treasureCount);
+        }
+
+        int findableCount = treasureDatabase.GetFindableTreasureCount(generalTerrainLootPool);
+        int scaledCount = findableCount * Mathf.Max(1, generalTerrainTreasureMultiplier);
+        int minimumCount = Mathf.Max(0, minimumGeneralTerrainTreasureCount);
+        int fallbackCount = Mathf.Max(0, generalTerrainTreasureCount > 0 ? generalTerrainTreasureCount : treasureCount);
+        return findableCount > 0 ? Mathf.Max(minimumCount, scaledCount) : fallbackCount;
+    }
+
+    private bool TryGetGeneralTerrainSpawnCenter(out Vector3 center)
+    {
+        Transform playerTransform = PlayerRigReferences.FindLocalPlayerTransform();
+
+        if (playerTransform != null)
+        {
+            center = playerTransform.position;
+            return true;
+        }
+
+        center = Vector3.zero;
+        return false;
+    }
+
+    private float GetCurrentWaterLevel()
+    {
+        if (waterSurface == null)
+        {
+            waterSurface = FindAnyObjectByType<OceanWaterSurface>();
+        }
+
+        return waterSurface != null ? waterSurface.waterLevel : 0f;
     }
 
     private Vector3 GetBuriedPosition(Vector3 position)

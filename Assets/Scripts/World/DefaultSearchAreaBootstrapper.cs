@@ -6,87 +6,99 @@ public static class DefaultSearchAreaBootstrapper
 {
     private const string BasicAreaName = "Basic Ground";
     private const string BasicAreaRootName = "Search Area - Basic Ground";
+    private const string ForestAreaName = "Forest Grove";
+    private const string ForestAreaRootName = "Search Area - Forest Grove";
     private const string StylizedSignTextResourcePath = "StylizedWoodenSign/source/StylizedWoodenSign_Text 1";
     private const string StylizedSignResourcePath = "StylizedWoodenSign/source/wooden sign";
     private const string StylizedSignMaterialResourcePath = "StylizedWoodenSign/Materials/StylizedWoodenSign";
-    private const string AreaSignLabel = "Darmowa\nDupcia";
+    private const string AreaSignLabel = "Start\n$300";
+    private const int BasicUnlockCost = 300;
+    private const int ForestUnlockCost = 1000;
     private const float StylizedSignUprightPitch = 90f;
     private const float PlacedStylizedSignYaw = 155f;
+    private const float BasicSignYaw = -60f;
+    private const float ForestSignYaw = -240f;
     private const float StylizedSignGroundClearance = 0.03f;
     private const float SignOffsetOutsideArea = 2f;
     private const float SignTextSurfaceOffset = 0.024f;
-    private const float AnchoredSignTextHeightRatio = 0.72f;
-    private const float AnchoredSignTextMinHeight = 0.52f;
-    private const float AnchoredSignTextMaxHeight = 0.9f;
+    private const float AnchoredSignTextHeightRatio = 0.92f;
+    private const float AnchoredSignTextMinHeight = 0.68f;
+    private const float AnchoredSignTextMaxHeight = 1.18f;
     private const float BoundarySegmentLength = 1.25f;
     private const float BoundaryThickness = 0.42f;
     private const float BoundaryHeight = 0.035f;
     private const float BoundaryGroundOffset = 0.035f;
 
-    private static readonly Vector2 BasicAreaMin = new Vector2(-770f, -730f);
-    private static readonly Vector2 BasicAreaMax = new Vector2(-720f, -680f);
+    private static readonly Vector2 BasicAreaCenter = new Vector2(-740f, -705f);
+    private static readonly Vector2 BasicAreaSize = new Vector2(80f, 80f);
+    private static readonly Vector2 BasicAreaMin = BasicAreaCenter - BasicAreaSize * 0.5f;
+    private static readonly Vector2 BasicAreaMax = BasicAreaCenter + BasicAreaSize * 0.5f;
+    private static readonly Vector2 BasicSignPosition = new Vector2(-699f, -711f);
+    private static readonly Vector2 ForestAreaCenter = new Vector2(-575f, -730f);
+    private static readonly Vector2 ForestAreaSize = new Vector2(110f, 80f);
+    private static readonly Vector2 ForestSignPosition = new Vector2(-631f, -730f);
+    private static bool isListeningForLanguageChanges;
+
+    private struct TransformSnapshot
+    {
+        public Transform transform;
+        public Vector3 position;
+        public Quaternion rotation;
+        public Vector3 localScale;
+    }
 
     public static void EnsureDefaultSearchAreas()
     {
-        EnsurePlacedStylizedSignText();
-        ConvertExistingSignTextsToTmp();
+        EnsureLanguageChangeListener();
 
-        bool hasBasicArea = HasSearchArea(BasicAreaName) || GameObject.Find(BasicAreaRootName) != null;
+        SearchArea basicArea = FindSearchArea(BasicAreaName);
+        bool hasBasicArea = basicArea != null || GameObject.Find(BasicAreaRootName) != null;
 
         if (!hasBasicArea)
         {
             CreateBasicGroundArea();
         }
+        else if (basicArea != null)
+        {
+            ConfigureExistingArea(
+                basicArea,
+                BasicAreaCenter,
+                BasicAreaSize,
+                BasicUnlockCost,
+                TreasureLootPool.SpecialField,
+                AreaSignLabel,
+                new Color(1f, 0.72f, 0.18f, 0.62f),
+                new Color(0.25f, 0.95f, 0.42f, 0.5f),
+                BasicSignPosition);
+        }
+
+        SearchArea forestArea = FindSearchArea(ForestAreaName);
+        bool hasForestArea = forestArea != null || GameObject.Find(ForestAreaRootName) != null;
+
+        if (!hasForestArea)
+        {
+            CreateForestGroveArea();
+        }
+        else if (forestArea != null)
+        {
+            ConfigureExistingArea(
+                forestArea,
+                ForestAreaCenter,
+                ForestAreaSize,
+                ForestUnlockCost,
+                TreasureLootPool.SpecialTreeField,
+                GetForestSignLabel(),
+                new Color(0.1f, 0.52f, 0.22f, 0.58f),
+                new Color(0.22f, 0.95f, 0.42f, 0.46f),
+                ForestSignPosition);
+        }
+
+        RefreshForestSignTexts();
     }
 
     public static int ConvertExistingSignTextsToTmp()
     {
-        int convertedCount = 0;
-        TextMesh[] legacyTexts = Object.FindObjectsByType<TextMesh>(FindObjectsInactive.Include);
-
-        foreach (TextMesh legacyText in legacyTexts)
-        {
-            if (legacyText == null || !IsSignTextObject(legacyText.gameObject))
-            {
-                continue;
-            }
-
-            GameObject textObject = legacyText.gameObject;
-            Transform textTransform = textObject.transform;
-            string label = NormalizeSignLabel(legacyText.text);
-
-            if (!TryApplyAnchoredTextLayout(textTransform, out Vector2 textBoxSize))
-            {
-                float textScale = Mathf.Clamp(legacyText.characterSize * 1.8f, 0.075f, 0.18f);
-                textTransform.localScale = Vector3.one * textScale;
-                textTransform.position += textTransform.forward * SignTextSurfaceOffset;
-                textBoxSize = new Vector2(8f, 3f);
-            }
-
-            DestroyComponent(legacyText);
-
-            TextMeshPro text = EnsureTextMeshPro(textObject);
-
-            ConfigureSignText(text, label, textBoxSize, 1f, true);
-            convertedCount++;
-        }
-
-        TextMeshPro[] tmpTexts = Object.FindObjectsByType<TextMeshPro>(FindObjectsInactive.Include);
-
-        foreach (TextMeshPro tmpText in tmpTexts)
-        {
-            if (tmpText == null || !IsSignTextObject(tmpText.gameObject))
-            {
-                continue;
-            }
-
-            if (TryApplyAnchoredTextLayout(tmpText.transform, out Vector2 textBoxSize))
-            {
-                ConfigureSignText(tmpText, tmpText.text, textBoxSize, GetAnchoredFontSizeMax(textBoxSize), true);
-            }
-        }
-
-        return convertedCount;
+        return 0;
     }
 
     private static void EnsurePlacedStylizedSignText()
@@ -98,16 +110,14 @@ public static class DefaultSearchAreaBootstrapper
             return;
         }
 
+        if (HasSignText(placedSign.transform))
+        {
+            return;
+        }
+
         if (!HasTextAnchors(placedSign.transform))
         {
             placedSign.transform.rotation = Quaternion.Euler(StylizedSignUprightPitch, PlacedStylizedSignYaw, 0f);
-        }
-
-        Transform placedBackText = placedSign.transform.Find("Sign Text Back");
-
-        if (placedBackText != null)
-        {
-            DestroyGameObject(placedBackText.gameObject);
         }
 
         if (ApplyAnchoredSignText(placedSign.transform, AreaSignLabel))
@@ -123,7 +133,7 @@ public static class DefaultSearchAreaBootstrapper
         CreateSignText(placedSign.transform, AreaSignLabel, new Vector3(0f, 0.09f, 1.55f), Quaternion.Euler(-StylizedSignUprightPitch, 0f, 0f));
     }
 
-    private static bool HasSearchArea(string areaName)
+    private static SearchArea FindSearchArea(string areaName)
     {
         SearchArea[] searchAreas = Object.FindObjectsByType<SearchArea>();
 
@@ -131,47 +141,246 @@ public static class DefaultSearchAreaBootstrapper
         {
             if (area != null && area.areaName == areaName)
             {
-                return true;
+                return area;
             }
         }
 
-        return false;
+        return null;
+    }
+
+    private static void EnsureLanguageChangeListener()
+    {
+        if (isListeningForLanguageChanges)
+        {
+            return;
+        }
+
+        GameLocalization.LanguageChanged += RefreshForestSignTexts;
+        isListeningForLanguageChanges = true;
+    }
+
+    private static string GetForestSignLabel()
+    {
+        return GameLocalization.TFormat("area.forest_sign", ForestUnlockCost);
+    }
+
+    private static void RefreshForestSignTexts()
+    {
+        SearchArea forestArea = FindSearchArea(ForestAreaName);
+
+        if (forestArea == null)
+        {
+            return;
+        }
+
+        SearchArea basicArea = FindSearchArea(BasicAreaName);
+        TextMeshPro fieldTextStyle = basicArea != null
+            ? FindSignText(FindDirectChildContaining(basicArea.transform, "Purchase Sign"))
+                ?? FindSignText(FindDirectChildContaining(basicArea.transform, "Owned Sign"))
+            : null;
+        string label = GetForestSignLabel();
+        ApplySignLabel(FindDirectChildContaining(forestArea.transform, "Purchase Sign"), label, fieldTextStyle);
+        ApplySignLabel(FindDirectChildContaining(forestArea.transform, "Owned Sign"), label, fieldTextStyle);
+    }
+
+    private static TextMeshPro FindSignText(GameObject sign)
+    {
+        if (sign == null)
+        {
+            return null;
+        }
+
+        TextMeshPro[] signTexts = sign.GetComponentsInChildren<TextMeshPro>(true);
+
+        foreach (TextMeshPro signText in signTexts)
+        {
+            if (signText != null && IsSignTextObject(signText.gameObject))
+            {
+                return signText;
+            }
+        }
+
+        return null;
+    }
+
+    private static void ApplySignLabel(GameObject sign, string label, TextMeshPro styleSource)
+    {
+        if (sign == null)
+        {
+            return;
+        }
+
+        string normalizedLabel = NormalizeSignLabel(label);
+        TextMeshPro[] signTexts = sign.GetComponentsInChildren<TextMeshPro>(true);
+
+        foreach (TextMeshPro signText in signTexts)
+        {
+            if (signText != null && IsSignTextObject(signText.gameObject))
+            {
+                CopySignTextStyle(styleSource, signText);
+                signText.text = normalizedLabel;
+                signText.ForceMeshUpdate();
+            }
+        }
+    }
+
+    private static void CopySignTextStyle(TextMeshPro source, TextMeshPro target)
+    {
+        if (source == null || target == null || source == target)
+        {
+            return;
+        }
+
+        target.font = source.font;
+
+        Material sourceMaterial = GetSafeSharedMaterial(source);
+
+        if (sourceMaterial != null)
+        {
+            target.fontSharedMaterial = sourceMaterial;
+        }
+
+        target.alignment = source.alignment;
+        target.fontStyle = source.fontStyle;
+        target.fontSize = source.fontSize;
+        target.enableAutoSizing = source.enableAutoSizing;
+        target.fontSizeMin = source.fontSizeMin;
+        target.fontSizeMax = source.fontSizeMax;
+        target.textWrappingMode = source.textWrappingMode;
+        target.overflowMode = source.overflowMode;
+        target.lineSpacing = source.lineSpacing;
+        target.characterSpacing = source.characterSpacing;
+        target.extraPadding = source.extraPadding;
+        target.enableCulling = source.enableCulling;
+        target.color = source.color;
+        target.margin = source.margin;
+        target.rectTransform.sizeDelta = source.rectTransform.sizeDelta;
+        target.transform.localPosition = source.transform.localPosition;
+        target.transform.localRotation = source.transform.localRotation;
+        target.transform.localScale = source.transform.localScale;
+
+        MeshRenderer sourceRenderer = source.GetComponent<MeshRenderer>();
+        MeshRenderer targetRenderer = target.GetComponent<MeshRenderer>();
+
+        if (sourceRenderer != null && targetRenderer != null)
+        {
+            targetRenderer.shadowCastingMode = sourceRenderer.shadowCastingMode;
+            targetRenderer.receiveShadows = sourceRenderer.receiveShadows;
+            targetRenderer.sortingOrder = sourceRenderer.sortingOrder;
+        }
+    }
+
+    private static void ConfigureExistingArea(
+        SearchArea area,
+        Vector2 center,
+        Vector2 size,
+        int unlockCost,
+        TreasureLootPool lootPool,
+        string signLabel,
+        Color lockedColor,
+        Color unlockedColor,
+        Vector2? signPositionOverride = null)
+    {
+        bool wasUnlocked = area.isUnlocked;
+        bool hasExistingVisuals = area.transform.childCount > 0;
+        List<TransformSnapshot> preservedVisuals = hasExistingVisuals ? CaptureNonBoundaryChildTransforms(area.transform) : null;
+
+        area.transform.position = new Vector3(center.x, GetGroundY(center.x, center.y), center.y);
+        RestoreTransformSnapshots(preservedVisuals);
+
+        area.size = size;
+        area.unlockCost = unlockCost;
+        area.lootPool = lootPool;
+
+        if (hasExistingVisuals)
+        {
+            RepairExistingAreaVisuals(area, center, size, lockedColor, unlockedColor, wasUnlocked, signPositionOverride);
+        }
+        else if (!HasConfiguredAreaVisuals(area))
+        {
+            RebuildAreaVisuals(area, center, size, signLabel, lockedColor, unlockedColor, wasUnlocked, signPositionOverride);
+        }
     }
 
     private static void CreateBasicGroundArea()
     {
-        Vector2 size = BasicAreaMax - BasicAreaMin;
-        Vector2 center = (BasicAreaMin + BasicAreaMax) * 0.5f;
+        CreateSearchArea(
+            BasicAreaRootName,
+            BasicAreaName,
+            BasicAreaMin,
+            BasicAreaMax,
+            BasicUnlockCost,
+            TreasureLootPool.SpecialField,
+            AreaSignLabel,
+            new Color(0.35f, 0.9f, 0.45f, 0.28f),
+            new Color(1f, 0.72f, 0.18f, 0.62f),
+            new Color(0.25f, 0.95f, 0.42f, 0.5f),
+            BasicSignPosition);
+    }
+
+    private static void CreateForestGroveArea()
+    {
+        Vector2 halfSize = ForestAreaSize * 0.5f;
+        CreateSearchArea(
+            ForestAreaRootName,
+            ForestAreaName,
+            ForestAreaCenter - halfSize,
+            ForestAreaCenter + halfSize,
+            ForestUnlockCost,
+            TreasureLootPool.SpecialTreeField,
+            GetForestSignLabel(),
+            new Color(0.12f, 0.55f, 0.24f, 0.26f),
+            new Color(0.1f, 0.52f, 0.22f, 0.58f),
+            new Color(0.22f, 0.95f, 0.42f, 0.46f),
+            ForestSignPosition);
+    }
+
+    private static void CreateSearchArea(
+        string rootName,
+        string areaName,
+        Vector2 areaMin,
+        Vector2 areaMax,
+        int unlockCost,
+        TreasureLootPool lootPool,
+        string signLabel,
+        Color areaColor,
+        Color lockedColor,
+        Color unlockedColor,
+        Vector2? signPositionOverride = null)
+    {
+        Vector2 size = areaMax - areaMin;
+        Vector2 center = (areaMin + areaMax) * 0.5f;
         Vector3 centerPosition = new Vector3(center.x, GetGroundY(center.x, center.y), center.y);
 
-        GameObject areaObject = new GameObject(BasicAreaRootName);
+        GameObject areaObject = new GameObject(rootName);
         areaObject.transform.position = centerPosition;
 
         SearchArea area = areaObject.AddComponent<SearchArea>();
-        area.areaName = BasicAreaName;
-        area.unlockCost = 0;
+        area.areaName = areaName;
+        area.unlockCost = unlockCost;
         area.isUnlocked = false;
         area.size = size;
-        area.areaColor = new Color(0.35f, 0.9f, 0.45f, 0.28f);
+        area.areaColor = areaColor;
+        area.lootPool = lootPool;
 
-        Material lockedMaterial = CreateMaterial(new Color(1f, 0.72f, 0.18f, 0.62f), true);
-        Material unlockedMaterial = CreateMaterial(new Color(0.25f, 0.95f, 0.42f, 0.5f), true);
+        Material lockedMaterial = CreateMaterial(lockedColor, true);
+        Material unlockedMaterial = CreateMaterial(unlockedColor, true);
         Material postMaterial = CreateMaterial(new Color(0.28f, 0.16f, 0.08f, 1f), false);
         Material boardMaterial = CreateMaterial(new Color(0.55f, 0.34f, 0.16f, 1f), false);
 
-        GameObject lockedMarker = CreateAreaBoundary("Basic Ground Locked Boundary", areaObject.transform, center, size, lockedMaterial);
-        GameObject unlockedMarker = CreateAreaBoundary("Basic Ground Unlocked Boundary", areaObject.transform, center, size, unlockedMaterial);
+        GameObject lockedMarker = CreateAreaBoundary(areaName + " Locked Boundary", areaObject.transform, center, size, lockedMaterial);
+        GameObject unlockedMarker = CreateAreaBoundary(areaName + " Unlocked Boundary", areaObject.transform, center, size, unlockedMaterial);
         unlockedMarker.SetActive(false);
 
-        Vector3 signPosition = new Vector3(center.x, GetGroundY(center.x, BasicAreaMax.y + SignOffsetOutsideArea), BasicAreaMax.y + SignOffsetOutsideArea);
+        Vector3 signPosition = GetAreaSignPosition(center, size, signPositionOverride);
         GameObject purchaseSign = CreateSign(
-            "Basic Ground Purchase Sign",
+            areaName + " Purchase Sign",
             areaObject.transform,
             signPosition,
-            centerPosition,
-            AreaSignLabel,
+            signLabel,
             postMaterial,
-            boardMaterial
+            boardMaterial,
+            GetAreaSignYaw(areaName)
         );
 
         SearchAreaPurchasePoint purchasePoint = purchaseSign.AddComponent<SearchAreaPurchasePoint>();
@@ -179,20 +388,213 @@ public static class DefaultSearchAreaBootstrapper
         purchasePoint.interactionDistance = 8.5f;
 
         GameObject ownedSign = CreateSign(
-            "Basic Ground Owned Sign",
+            areaName + " Owned Sign",
             areaObject.transform,
             signPosition,
-            centerPosition,
-            AreaSignLabel,
+            signLabel,
             postMaterial,
-            boardMaterial
+            boardMaterial,
+            GetAreaSignYaw(areaName)
         );
         ownedSign.SetActive(false);
 
         area.lockedObjects = new[] { lockedMarker, purchaseSign };
         area.unlockedObjects = new[] { unlockedMarker, ownedSign };
 
-        Debug.Log("Created Basic Ground search area at " + centerPosition + ".");
+        Debug.Log("Created " + areaName + " search area at " + centerPosition + ".");
+    }
+
+    private static void RebuildAreaVisuals(
+        SearchArea area,
+        Vector2 center,
+        Vector2 size,
+        string signLabel,
+        Color lockedColor,
+        Color unlockedColor,
+        bool isUnlocked,
+        Vector2? signPositionOverride = null)
+    {
+        if (area == null)
+        {
+            return;
+        }
+
+        for (int i = area.transform.childCount - 1; i >= 0; i--)
+        {
+            DestroyGameObject(area.transform.GetChild(i).gameObject);
+        }
+
+        Material lockedMaterial = CreateMaterial(lockedColor, true);
+        Material unlockedMaterial = CreateMaterial(unlockedColor, true);
+        Material postMaterial = CreateMaterial(new Color(0.28f, 0.16f, 0.08f, 1f), false);
+        Material boardMaterial = CreateMaterial(new Color(0.55f, 0.34f, 0.16f, 1f), false);
+
+        GameObject lockedMarker = CreateAreaBoundary(area.areaName + " Locked Boundary", area.transform, center, size, lockedMaterial);
+        GameObject unlockedMarker = CreateAreaBoundary(area.areaName + " Unlocked Boundary", area.transform, center, size, unlockedMaterial);
+
+        Vector3 signPosition = GetAreaSignPosition(center, size, signPositionOverride);
+        GameObject purchaseSign = CreateSign(
+            area.areaName + " Purchase Sign",
+            area.transform,
+            signPosition,
+            signLabel,
+            postMaterial,
+            boardMaterial,
+            GetAreaSignYaw(area.areaName)
+        );
+
+        SearchAreaPurchasePoint purchasePoint = purchaseSign.AddComponent<SearchAreaPurchasePoint>();
+        purchasePoint.targetArea = area;
+        purchasePoint.interactionDistance = 8.5f;
+
+        GameObject ownedSign = CreateSign(
+            area.areaName + " Owned Sign",
+            area.transform,
+            signPosition,
+            signLabel,
+            postMaterial,
+            boardMaterial,
+            GetAreaSignYaw(area.areaName)
+        );
+
+        area.lockedObjects = new[] { lockedMarker, purchaseSign };
+        area.unlockedObjects = new[] { unlockedMarker, ownedSign };
+
+        lockedMarker.SetActive(!isUnlocked);
+        purchaseSign.SetActive(!isUnlocked);
+        unlockedMarker.SetActive(isUnlocked);
+        ownedSign.SetActive(isUnlocked);
+    }
+
+    private static void RepairExistingAreaVisuals(
+        SearchArea area,
+        Vector2 center,
+        Vector2 size,
+        Color lockedColor,
+        Color unlockedColor,
+        bool isUnlocked,
+        Vector2? signPositionOverride = null)
+    {
+        if (area == null)
+        {
+            return;
+        }
+
+        Material lockedMaterial = CreateMaterial(lockedColor, true);
+        Material unlockedMaterial = CreateMaterial(unlockedColor, true);
+
+        GameObject lockedBoundary = ReplaceAreaBoundary(area.transform, area.areaName + " Locked Boundary", center, size, lockedMaterial);
+        GameObject unlockedBoundary = ReplaceAreaBoundary(area.transform, area.areaName + " Unlocked Boundary", center, size, unlockedMaterial);
+        GameObject purchaseSign = FindDirectChildContaining(area.transform, "Purchase Sign");
+        GameObject ownedSign = FindDirectChildContaining(area.transform, "Owned Sign");
+        Vector3 signPosition = GetAreaSignPosition(center, size, signPositionOverride);
+        bool shouldMoveExistingSigns = signPositionOverride.HasValue;
+
+        if (purchaseSign != null)
+        {
+            SearchAreaPurchasePoint purchasePoint = purchaseSign.GetComponent<SearchAreaPurchasePoint>();
+
+            if (purchasePoint == null)
+            {
+                purchasePoint = purchaseSign.AddComponent<SearchAreaPurchasePoint>();
+            }
+
+            purchasePoint.targetArea = area;
+            purchasePoint.interactionDistance = 8.5f;
+
+            if (shouldMoveExistingSigns)
+            {
+                PlaceExistingSign(purchaseSign.transform, signPosition, GetAreaSignYaw(area.areaName));
+            }
+        }
+
+        if (ownedSign != null && shouldMoveExistingSigns)
+        {
+            PlaceExistingSign(ownedSign.transform, signPosition, GetAreaSignYaw(area.areaName));
+        }
+
+        area.lockedObjects = CompactObjects(lockedBoundary, purchaseSign);
+        area.unlockedObjects = CompactObjects(unlockedBoundary, ownedSign);
+
+        SetObjectsActive(area.lockedObjects, !isUnlocked);
+        SetObjectsActive(area.unlockedObjects, isUnlocked);
+    }
+
+    private static GameObject ReplaceAreaBoundary(Transform parent, string boundaryName, Vector2 center, Vector2 size, Material material)
+    {
+        GameObject existingBoundary = FindDirectChildContaining(parent, boundaryName);
+
+        if (existingBoundary == null)
+        {
+            string boundaryKind = boundaryName.Contains("Unlocked") ? "Unlocked Boundary" : "Locked Boundary";
+            existingBoundary = FindDirectChildContaining(parent, boundaryKind);
+        }
+
+        if (existingBoundary != null)
+        {
+            DestroyGameObject(existingBoundary);
+        }
+
+        return CreateAreaBoundary(boundaryName, parent, center, size, material);
+    }
+
+    private static Vector3 GetAreaSignPosition(Vector2 center, Vector2 size, Vector2? signPositionOverride)
+    {
+        if (signPositionOverride.HasValue)
+        {
+            Vector2 signPosition = signPositionOverride.Value;
+            return new Vector3(signPosition.x, GetGroundY(signPosition.x, signPosition.y), signPosition.y);
+        }
+
+        float z = center.y + size.y * 0.5f + SignOffsetOutsideArea;
+        return new Vector3(center.x, GetGroundY(center.x, z), z);
+    }
+
+    private static float GetAreaSignYaw(string areaName)
+    {
+        return areaName == ForestAreaName ? ForestSignYaw : BasicSignYaw;
+    }
+
+    private static void PlaceExistingSign(Transform sign, Vector3 signPosition, float signYaw)
+    {
+        if (sign == null)
+        {
+            return;
+        }
+
+        sign.position = signPosition;
+        sign.rotation = Quaternion.Euler(0f, signYaw, 0f);
+    }
+
+    private static GameObject[] CompactObjects(params GameObject[] objects)
+    {
+        List<GameObject> compactedObjects = new List<GameObject>();
+
+        foreach (GameObject target in objects)
+        {
+            if (target != null)
+            {
+                compactedObjects.Add(target);
+            }
+        }
+
+        return compactedObjects.ToArray();
+    }
+
+    private static void SetObjectsActive(GameObject[] objects, bool isActive)
+    {
+        if (objects == null)
+        {
+            return;
+        }
+
+        foreach (GameObject target in objects)
+        {
+            if (target != null)
+            {
+                target.SetActive(isActive);
+            }
+        }
     }
 
     private static GameObject CreateAreaBoundary(string name, Transform parent, Vector2 center, Vector2 size, Material material)
@@ -273,22 +675,15 @@ public static class DefaultSearchAreaBootstrapper
         string name,
         Transform parent,
         Vector3 position,
-        Vector3 faceTarget,
         string label,
         Material postMaterial,
-        Material boardMaterial)
+        Material boardMaterial,
+        float signYaw)
     {
         GameObject sign = new GameObject(name);
         sign.transform.SetParent(parent);
         sign.transform.position = position;
-
-        Vector3 forward = faceTarget - position;
-        forward.y = 0f;
-
-        if (forward.sqrMagnitude > 0.01f)
-        {
-            sign.transform.rotation = Quaternion.LookRotation(forward.normalized, Vector3.up);
-        }
+        sign.transform.rotation = Quaternion.Euler(0f, signYaw, 0f);
 
         if (CreateStylizedSign(sign.transform, label))
         {
@@ -382,10 +777,10 @@ public static class DefaultSearchAreaBootstrapper
         textObject.transform.SetParent(parent);
         textObject.transform.localPosition = localPosition;
         textObject.transform.localRotation = localRotation;
-        textObject.transform.localScale = Vector3.one * 0.16f;
+        textObject.transform.localScale = Vector3.one * 0.19f;
 
         TextMeshPro text = EnsureTextMeshPro(textObject);
-        ConfigureSignText(text, label, new Vector2(8f, 3f), 1f);
+        ConfigureSignText(text, label, new Vector2(8f, 3f), 1.35f);
     }
 
     private static bool ApplyAnchoredSignText(Transform signRoot, string label)
@@ -482,9 +877,9 @@ public static class DefaultSearchAreaBootstrapper
         text.alignment = TextAlignmentOptions.Center;
         text.fontStyle = FontStyles.Bold;
         text.fontSize = fontSize;
-        text.enableAutoSizing = fitToBox;
-        text.fontSizeMin = fitToBox ? Mathf.Max(0.05f, fontSize * 0.25f) : fontSize;
-        text.fontSizeMax = fitToBox ? fontSize : fontSize;
+        text.enableAutoSizing = false;
+        text.fontSizeMin = fontSize;
+        text.fontSizeMax = fontSize;
         text.textWrappingMode = TextWrappingModes.NoWrap;
         text.overflowMode = TextOverflowModes.Overflow;
         text.lineSpacing = -8f;
@@ -516,6 +911,127 @@ public static class DefaultSearchAreaBootstrapper
         }
 
         return textObject.name == "Sign Text Front" || textObject.name == "Sign Text Back";
+    }
+
+    private static bool HasSignText(Transform root)
+    {
+        return FindDeepChild(root, "Sign Text Front") != null || FindDeepChild(root, "Sign Text Back") != null;
+    }
+
+    private static bool HasConfiguredAreaVisuals(SearchArea area)
+    {
+        if (area == null)
+        {
+            return false;
+        }
+
+        if (area.transform.childCount > 0)
+        {
+            return true;
+        }
+
+        if (area.lockedObjects == null || area.unlockedObjects == null)
+        {
+            return false;
+        }
+
+        if (area.lockedObjects.Length == 0 || area.unlockedObjects.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (GameObject lockedObject in area.lockedObjects)
+        {
+            if (lockedObject == null)
+            {
+                return false;
+            }
+        }
+
+        foreach (GameObject unlockedObject in area.unlockedObjects)
+        {
+            if (unlockedObject == null)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static List<TransformSnapshot> CaptureNonBoundaryChildTransforms(Transform parent)
+    {
+        if (parent == null)
+        {
+            return null;
+        }
+
+        List<TransformSnapshot> snapshots = new List<TransformSnapshot>();
+
+        for (int i = 0; i < parent.childCount; i++)
+        {
+            Transform child = parent.GetChild(i);
+
+            if (child == null || IsAreaBoundaryRoot(child))
+            {
+                continue;
+            }
+
+            snapshots.Add(new TransformSnapshot
+            {
+                transform = child,
+                position = child.position,
+                rotation = child.rotation,
+                localScale = child.localScale
+            });
+        }
+
+        return snapshots;
+    }
+
+    private static void RestoreTransformSnapshots(List<TransformSnapshot> snapshots)
+    {
+        if (snapshots == null)
+        {
+            return;
+        }
+
+        foreach (TransformSnapshot snapshot in snapshots)
+        {
+            if (snapshot.transform == null)
+            {
+                continue;
+            }
+
+            snapshot.transform.position = snapshot.position;
+            snapshot.transform.rotation = snapshot.rotation;
+            snapshot.transform.localScale = snapshot.localScale;
+        }
+    }
+
+    private static bool IsAreaBoundaryRoot(Transform candidate)
+    {
+        return candidate != null && candidate.name.Contains("Boundary");
+    }
+
+    private static GameObject FindDirectChildContaining(Transform parent, string namePart)
+    {
+        if (parent == null || string.IsNullOrEmpty(namePart))
+        {
+            return null;
+        }
+
+        for (int i = 0; i < parent.childCount; i++)
+        {
+            Transform child = parent.GetChild(i);
+
+            if (child != null && child.name.Contains(namePart))
+            {
+                return child.gameObject;
+            }
+        }
+
+        return null;
     }
 
     private static string NormalizeSignLabel(string label)
@@ -587,7 +1103,7 @@ public static class DefaultSearchAreaBootstrapper
 
     private static float GetAnchoredFontSizeMax(Vector2 textBoxSize)
     {
-        return Mathf.Clamp(Mathf.Min(textBoxSize.x * 0.42f, textBoxSize.y * 0.52f), 0.22f, 0.58f);
+        return Mathf.Clamp(Mathf.Min(textBoxSize.x * 0.58f, textBoxSize.y * 0.72f), 0.32f, 0.82f);
     }
 
     private static void ApplyReadableTmpMaterial(TextMeshPro text)

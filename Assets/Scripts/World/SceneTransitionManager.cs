@@ -25,6 +25,31 @@ public class SceneTransitionManager : MonoBehaviour
     private static ulong preparedInteriorSceneHandle;
     private static AsyncOperation interiorLoadOperation;
     private static readonly Dictionary<Material, Material> repairedMaterialCache = new Dictionary<Material, Material>();
+    private static bool hasSavedWorldLighting;
+    private static UnityEngine.Rendering.AmbientMode savedAmbientMode;
+    private static Color savedAmbientLight;
+    private static float savedAmbientIntensity;
+    private static float savedReflectionIntensity;
+    private static LightmapData[] savedLightmaps;
+    private static LightmapsMode savedLightmapsMode;
+    private static LightProbes savedLightProbes;
+    private static readonly List<DirectionalLightState> savedDirectionalLights = new List<DirectionalLightState>();
+
+    private struct DirectionalLightState
+    {
+        public Light light;
+        public float intensity;
+        public float shadowStrength;
+        public LightShadows shadows;
+
+        public DirectionalLightState(Light light)
+        {
+            this.light = light;
+            intensity = light != null ? light.intensity : 0f;
+            shadowStrength = light != null ? light.shadowStrength : 1f;
+            shadows = light != null ? light.shadows : LightShadows.None;
+        }
+    }
 
     public static bool IsHomeInteriorActive => isPlayerInsideHomeInterior || IsHomeInteriorScene(SceneManager.GetActiveScene());
 
@@ -101,7 +126,7 @@ public class SceneTransitionManager : MonoBehaviour
         ScenePortal portal = portalObject.AddComponent<ScenePortal>();
         portal.mode = ScenePortal.PortalMode.ExitHomeInterior;
         portal.interactionDistance = 2.4f;
-        portal.promptText = "E - Wyjdz z domku";
+        portal.promptText = "E - Leave house";
         SceneManager.MoveGameObjectToScene(portalObject, interiorScene);
     }
 
@@ -123,6 +148,7 @@ public class SceneTransitionManager : MonoBehaviour
 
         RepairInteriorMaterialsForUrp(interiorScene);
         StabilizeInteriorScene(interiorScene);
+        HomeInteractionStationBootstrapper.EnsureHomeInteriorStations();
         preparedInteriorSceneHandle = interiorSceneHandle;
     }
 
@@ -200,14 +226,15 @@ public class SceneTransitionManager : MonoBehaviour
 
         isPlayerInsideHomeInterior = false;
         hasWorldReturnPosition = false;
-        SetHomeInteriorVisible(false);
-
         Scene mainScene = SceneManager.GetSceneByName(MainWorldSceneName);
 
         if (mainScene.IsValid() && mainScene.isLoaded)
         {
             SceneManager.SetActiveScene(mainScene);
         }
+
+        SetHomeInteriorVisible(false);
+        RestoreWorldLightingEnvironment();
     }
 
     private bool CapturePersistentPlayer()
@@ -317,6 +344,7 @@ public class SceneTransitionManager : MonoBehaviour
         SetHomeInteriorVisible(true);
         PrepareHomeInteriorScene();
         EnsureInteriorExitPortal();
+        ApplyInteriorLightingEnvironment();
         MovePersistentPlayer(InteriorSpawnPosition, InteriorSpawnRotation);
         DisableNonPlayerCameras();
 
@@ -360,6 +388,94 @@ public class SceneTransitionManager : MonoBehaviour
             {
                 rootObject.SetActive(visible);
             }
+        }
+    }
+
+    private static void ApplyInteriorLightingEnvironment()
+    {
+        if (!hasSavedWorldLighting)
+        {
+            savedAmbientMode = RenderSettings.ambientMode;
+            savedAmbientLight = RenderSettings.ambientLight;
+            savedAmbientIntensity = RenderSettings.ambientIntensity;
+            savedReflectionIntensity = RenderSettings.reflectionIntensity;
+            savedLightmaps = LightmapSettings.lightmaps;
+            savedLightmapsMode = LightmapSettings.lightmapsMode;
+            savedLightProbes = LightmapSettings.lightProbes;
+            savedDirectionalLights.Clear();
+
+            Light[] lights = Object.FindObjectsByType<Light>();
+
+            foreach (Light light in lights)
+            {
+                if (light != null && light.type == LightType.Directional)
+                {
+                    savedDirectionalLights.Add(new DirectionalLightState(light));
+                }
+            }
+
+            hasSavedWorldLighting = true;
+        }
+
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
+        RenderSettings.ambientLight = new Color(0.13f, 0.12f, 0.105f, 1f);
+        RenderSettings.ambientIntensity = 0.36f;
+        RenderSettings.reflectionIntensity = 0.10f;
+        LightmapSettings.lightmaps = new LightmapData[0];
+        LightmapSettings.lightProbes = null;
+
+        for (int i = 0; i < savedDirectionalLights.Count; i++)
+        {
+            Light light = savedDirectionalLights[i].light;
+
+            if (light == null)
+            {
+                continue;
+            }
+
+            light.intensity = 0.16f;
+            light.shadowStrength = 0.2f;
+            light.shadows = LightShadows.None;
+        }
+    }
+
+    private static void RestoreWorldLightingEnvironment()
+    {
+        if (!hasSavedWorldLighting)
+        {
+            return;
+        }
+
+        RenderSettings.ambientMode = savedAmbientMode;
+        RenderSettings.ambientLight = savedAmbientLight;
+        RenderSettings.ambientIntensity = savedAmbientIntensity;
+        RenderSettings.reflectionIntensity = savedReflectionIntensity;
+        LightmapSettings.lightmaps = savedLightmaps;
+        LightmapSettings.lightmapsMode = savedLightmapsMode;
+        LightmapSettings.lightProbes = savedLightProbes;
+
+        for (int i = 0; i < savedDirectionalLights.Count; i++)
+        {
+            DirectionalLightState state = savedDirectionalLights[i];
+
+            if (state.light == null)
+            {
+                continue;
+            }
+
+            state.light.intensity = state.intensity;
+            state.light.shadowStrength = state.shadowStrength;
+            state.light.shadows = state.shadows;
+        }
+
+        savedDirectionalLights.Clear();
+        hasSavedWorldLighting = false;
+
+        DayNightCycle dayNightCycle = DayNightCycle.Instance;
+
+        if (dayNightCycle != null)
+        {
+            dayNightCycle.RefreshLighting();
         }
     }
 
@@ -411,7 +527,7 @@ public class SceneTransitionManager : MonoBehaviour
         ScenePortal portal = portalObject.AddComponent<ScenePortal>();
         portal.mode = ScenePortal.PortalMode.ExitHomeInterior;
         portal.interactionDistance = 2.25f;
-        portal.promptText = "E - Wyjdz z domku";
+        portal.promptText = "E - Leave house";
         portal.promptAnchor = portalObject.transform;
         portal.highlightRenderers = doorRenderers;
         portal.highlightColor = new Color(0.2f, 1f, 0.35f, 1f);
@@ -615,8 +731,10 @@ public class SceneTransitionManager : MonoBehaviour
             repairedMaterial.EnableKeyword("_METALLICSPECGLOSSMAP");
         }
 
-        SetFloat(repairedMaterial, GetFloat(source, 0f, "_Metallic", "_Metalness"), "_Metallic");
-        SetFloat(repairedMaterial, GetFloat(source, 0.45f, "_Smoothness", "_Glossiness", "_Gloss"), "_Smoothness");
+        SetFloat(repairedMaterial, 0f, "_Metallic");
+        SetFloat(repairedMaterial, Mathf.Min(GetFloat(source, 0.12f, "_Smoothness", "_Glossiness", "_Gloss"), 0.18f), "_Smoothness", "_Glossiness");
+        SetFloat(repairedMaterial, 0f, "_SpecularHighlights");
+        SetFloat(repairedMaterial, 0f, "_EnvironmentReflections");
 
         if (ShouldBeTransparent(source, baseColor))
         {
@@ -916,8 +1034,15 @@ public class ScenePortal : MonoBehaviour
     {
         if (IsPlayerInRange() && !GameUIState.AnyMenuOpen)
         {
-            GameGui.DrawToast(new Rect(Screen.width * 0.5f - 190f, Screen.height - 178f, 380f, 40f), promptText);
+            GameGui.DrawToast(new Rect(Screen.width * 0.5f - 190f, Screen.height - 178f, 380f, 40f), GetPromptText());
         }
+    }
+
+    private string GetPromptText()
+    {
+        return mode == PortalMode.ExitHomeInterior
+            ? GameLocalization.T("home.exit_prompt")
+            : promptText;
     }
 
     private bool IsPlayerInRange()

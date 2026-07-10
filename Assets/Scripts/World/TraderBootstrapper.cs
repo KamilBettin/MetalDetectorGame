@@ -94,8 +94,8 @@ public static class TraderBootstrapper
             return;
         }
 
-        UpgradeShop upgradeShop = FindShop(true, false);
-        UpgradeShop sellShop = FindShop(false, true);
+        UpgradeShop upgradeShop = FindShop(false, true);
+        UpgradeShop sellShop = FindShop(true, false);
 
         if (upgradeShop == null)
         {

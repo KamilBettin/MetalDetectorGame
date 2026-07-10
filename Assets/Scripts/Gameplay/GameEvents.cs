@@ -2,13 +2,13 @@ using UnityEngine;
 
 public static class GameEvents
 {
-    public static event System.Action<int> ScannedCellsChanged;
+    public static event System.Action<int> GroundScansChanged;
     public static event System.Action<DetectableTreasure> TreasureFound;
     public static event System.Action<int> TreasuresSold;
 
-    public static void ReportScannedCells(int totalScannedCells)
+    public static void ReportGroundScans(int totalScans)
     {
-        ScannedCellsChanged?.Invoke(totalScannedCells);
+        GroundScansChanged?.Invoke(totalScans);
     }
 
     public static void ReportTreasureFound(DetectableTreasure treasure)

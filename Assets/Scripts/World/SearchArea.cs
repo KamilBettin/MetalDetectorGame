@@ -3,10 +3,11 @@ using UnityEngine;
 public class SearchArea : MonoBehaviour
 {
     public string areaName = "Search Area";
-    public int unlockCost = 250;
+    public int unlockCost = 650;
     public bool isUnlocked;
     public Vector2 size = new Vector2(24f, 24f);
     public Color areaColor = new Color(0.25f, 0.8f, 0.45f, 0.28f);
+    public TreasureLootPool lootPool = TreasureLootPool.SpecialField;
     public GameObject[] lockedObjects;
     public GameObject[] unlockedObjects;
 

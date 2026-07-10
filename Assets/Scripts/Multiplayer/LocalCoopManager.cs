@@ -1714,9 +1714,7 @@ public class LocalCoopManager : MonoBehaviour
             return null;
         }
 
-        return FindIconInDefinitions(database.treasures, itemName)
-            ?? FindIconInDefinitions(database.generalTerrainTreasures, itemName)
-            ?? FindIconInDefinitions(database.searchAreaTreasures, itemName);
+        return FindIconInDefinitions(database.GetAllIconDefinitions(), itemName);
     }
 
     private Sprite FindIconInDefinitions(TreasureDefinition[] definitions, string itemName)

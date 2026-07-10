@@ -6,6 +6,16 @@ using UnityEngine.InputSystem;
 public class DetectorScreenSignalDisplay : MonoBehaviour
 {
     public string screenRendererName = "Plane.003";
+    public string[] screenRendererNames =
+    {
+        "Plane.003",
+        "Plane.005",
+        "Plane.006",
+        "Plane.002",
+        "Plane.004",
+        "Plane.007",
+        "Plane.009"
+    };
     public int textureSize = 128;
     public float refreshRate = 20f;
     public bool forceUnlitScreenMaterial = true;
@@ -93,13 +103,43 @@ public class DetectorScreenSignalDisplay : MonoBehaviour
 
         foreach (Renderer renderer in renderers)
         {
-            if (renderer == null || renderer.transform.name != screenRendererName)
+            if (renderer == null || !IsScreenRenderer(renderer))
             {
                 continue;
             }
 
             RegisterScreenRenderer(renderer);
         }
+    }
+
+    private bool IsScreenRenderer(Renderer renderer)
+    {
+        if (renderer == null)
+        {
+            return false;
+        }
+
+        string rendererName = renderer.transform.name;
+
+        if (!string.IsNullOrEmpty(screenRendererName) && rendererName == screenRendererName)
+        {
+            return true;
+        }
+
+        if (screenRendererNames == null)
+        {
+            return false;
+        }
+
+        foreach (string candidateName in screenRendererNames)
+        {
+            if (!string.IsNullOrEmpty(candidateName) && rendererName == candidateName)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void RegisterScreenRenderer(Renderer screenRenderer)
@@ -208,7 +248,7 @@ public class DetectorScreenSignalDisplay : MonoBehaviour
 
     private bool IsScanInputHeld()
     {
-        return !GameUIState.AnyMenuOpen && Mouse.current != null && Mouse.current.leftButton.isPressed;
+        return !GameUIState.AnyBlockingUIOpen && Mouse.current != null && Mouse.current.leftButton.isPressed;
     }
 
     private void DrawScreen(float signalStrength, bool powerOn)

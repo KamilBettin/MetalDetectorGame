@@ -18,6 +18,14 @@ public class DayNightCycle : MonoBehaviour
     private int dayNumber = 1;
     private string statusMessage = "";
     private float statusMessageTimer;
+    private Material sourceSkyMaterial;
+    private Material runtimeSkyMaterial;
+    private Material celestialMaterial;
+    private GameObject celestialBody;
+    private Renderer celestialRenderer;
+    private Camera playerCamera;
+    private OceanWaterSurface waterSurface;
+    private float initialSkyRotation;
 
     public int DayNumber => dayNumber;
     public bool IsNight => isNight;
@@ -39,7 +47,32 @@ public class DayNightCycle : MonoBehaviour
     private void Start()
     {
         ResolveSunLight();
+        EnsureRuntimeSky();
+        EnsureCelestialBody();
         ApplyLighting();
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this)
+        {
+            Instance = null;
+        }
+
+        if (runtimeSkyMaterial != null && RenderSettings.skybox == runtimeSkyMaterial)
+        {
+            RenderSettings.skybox = sourceSkyMaterial;
+        }
+
+        if (runtimeSkyMaterial != null)
+        {
+            Destroy(runtimeSkyMaterial);
+        }
+
+        if (celestialMaterial != null)
+        {
+            Destroy(celestialMaterial);
+        }
     }
 
     private void Update()
@@ -85,6 +118,11 @@ public class DayNightCycle : MonoBehaviour
         ApplyLighting();
     }
 
+    public void RefreshLighting()
+    {
+        ApplyLighting();
+    }
+
     private void StartNight()
     {
         isNight = true;
@@ -118,16 +156,6 @@ public class DayNightCycle : MonoBehaviour
             if (scanner != null)
             {
                 scanner.ClearScannedArea();
-            }
-        }
-
-        DetectorBattery[] batteries = FindObjectsByType<DetectorBattery>();
-
-        foreach (DetectorBattery battery in batteries)
-        {
-            if (battery != null)
-            {
-                battery.charge = battery.maxCharge;
             }
         }
 
@@ -206,28 +234,237 @@ public class DayNightCycle : MonoBehaviour
 
     private void ApplyLighting()
     {
+        if (SceneTransitionManager.IsHomeInteriorActive)
+        {
+            if (celestialBody != null)
+            {
+                celestialBody.SetActive(false);
+            }
+
+            return;
+        }
+
         ResolveSunLight();
+        EnsureRuntimeSky();
+        EnsureCelestialBody();
+        RenderSettings.sun = sunLight;
 
         float t = Phase01;
 
         if (isNight)
         {
-            sunLight.intensity = Mathf.Lerp(0.12f, 0.06f, Mathf.Sin(t * Mathf.PI));
+            float moonArc = Mathf.Sin(t * Mathf.PI);
+            sunLight.intensity = Mathf.Lerp(0.16f, 0.28f, Mathf.Pow(moonArc, 0.65f));
             sunLight.color = nightLightColor;
-            sunLight.transform.rotation = Quaternion.Euler(Mathf.Lerp(195f, 330f, t), -35f, 0f);
-            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-            RenderSettings.ambientLight = nightAmbientColor;
-            RenderSettings.ambientIntensity = 0.22f;
+            sunLight.transform.rotation = Quaternion.Euler(52f, 136f, 0f);
+            ApplyWorldShadowSettings(Mathf.Lerp(0.38f, 0.46f, moonArc));
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+            RenderSettings.ambientSkyColor = Color.Lerp(new Color(0.045f, 0.065f, 0.13f), new Color(0.075f, 0.11f, 0.22f), moonArc);
+            RenderSettings.ambientEquatorColor = Color.Lerp(new Color(0.035f, 0.045f, 0.085f), new Color(0.055f, 0.075f, 0.14f), moonArc);
+            RenderSettings.ambientGroundColor = new Color(0.018f, 0.023f, 0.045f, 1f);
+            RenderSettings.ambientLight = RenderSettings.ambientEquatorColor;
+            RenderSettings.ambientIntensity = Mathf.Lerp(0.28f, 0.38f, moonArc);
+            RenderSettings.reflectionIntensity = Mathf.Lerp(0.16f, 0.25f, moonArc);
+            ApplySkyAppearance(true, moonArc);
+            UpdateCelestialBody(true, moonArc, t);
+            ApplyWaterAppearance(true, moonArc);
+            PostProcessingBootstrapper.ApplyIslandAtmosphere(t, true, moonArc);
             return;
         }
 
         float sunArc = Mathf.Sin(t * Mathf.PI);
-        sunLight.intensity = Mathf.Lerp(0.45f, 1.1f, sunArc);
-        sunLight.color = Color.Lerp(new Color(1f, 0.72f, 0.48f, 1f), dayLightColor, sunArc);
-        sunLight.transform.rotation = Quaternion.Euler(Mathf.Lerp(25f, 155f, t), -35f, 0f);
-        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-        RenderSettings.ambientLight = Color.Lerp(new Color(0.38f, 0.36f, 0.34f, 1f), dayAmbientColor, sunArc);
-        RenderSettings.ambientIntensity = Mathf.Lerp(0.72f, 1f, sunArc);
+        sunLight.intensity = Mathf.Lerp(0.58f, 1.08f, Mathf.Pow(sunArc, 0.58f));
+        sunLight.color = Color.Lerp(new Color(1f, 0.7f, 0.43f, 1f), new Color(1f, 0.95f, 0.84f, 1f), sunArc);
+        sunLight.transform.rotation = Quaternion.Euler(58f, -38f, 0f);
+        ApplyWorldShadowSettings(Mathf.Lerp(0.58f, 0.68f, sunArc));
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+        RenderSettings.ambientSkyColor = Color.Lerp(new Color(0.5f, 0.39f, 0.31f), new Color(0.43f, 0.56f, 0.65f), sunArc);
+        RenderSettings.ambientEquatorColor = Color.Lerp(new Color(0.4f, 0.33f, 0.28f), new Color(0.4f, 0.45f, 0.43f), sunArc);
+        RenderSettings.ambientGroundColor = Color.Lerp(new Color(0.19f, 0.15f, 0.12f), new Color(0.22f, 0.21f, 0.18f), sunArc);
+        RenderSettings.ambientLight = RenderSettings.ambientEquatorColor;
+        RenderSettings.ambientIntensity = Mathf.Lerp(0.64f, 0.78f, sunArc);
+        RenderSettings.reflectionIntensity = Mathf.Lerp(0.38f, 0.58f, sunArc);
+        ApplySkyAppearance(false, sunArc);
+        UpdateCelestialBody(false, sunArc, t);
+        ApplyWaterAppearance(false, sunArc);
+        PostProcessingBootstrapper.ApplyIslandAtmosphere(t, false, sunArc);
+    }
+
+    private void ApplyWorldShadowSettings(float shadowStrength)
+    {
+        if (sunLight == null)
+        {
+            return;
+        }
+
+        sunLight.shadows = LightShadows.Soft;
+        sunLight.shadowStrength = shadowStrength;
+        sunLight.shadowBias = 0.04f;
+        sunLight.shadowNormalBias = 0.24f;
+        sunLight.shadowNearPlane = 0.2f;
+        sunLight.shadowAngle = 0.55f;
+    }
+
+    private void EnsureRuntimeSky()
+    {
+        if (runtimeSkyMaterial == null)
+        {
+            sourceSkyMaterial = RenderSettings.skybox;
+
+            if (sourceSkyMaterial == null)
+            {
+                return;
+            }
+
+            runtimeSkyMaterial = new Material(sourceSkyMaterial)
+            {
+                name = sourceSkyMaterial.name + " (Runtime Atmosphere)",
+                hideFlags = HideFlags.HideAndDontSave
+            };
+
+            initialSkyRotation = runtimeSkyMaterial.HasProperty("_Rotation")
+                ? runtimeSkyMaterial.GetFloat("_Rotation")
+                : 0f;
+        }
+
+        RenderSettings.skybox = runtimeSkyMaterial;
+    }
+
+    private void ApplySkyAppearance(bool night, float arc)
+    {
+        if (runtimeSkyMaterial == null)
+        {
+            return;
+        }
+
+        Color tint = night
+            ? Color.Lerp(new Color(0.13f, 0.17f, 0.3f), new Color(0.18f, 0.24f, 0.4f), arc)
+            : Color.Lerp(new Color(0.58f, 0.45f, 0.37f), new Color(0.52f, 0.57f, 0.64f), arc);
+        float exposure = night ? Mathf.Lerp(0.28f, 0.42f, arc) : Mathf.Lerp(0.9f, 1.12f, arc);
+
+        if (runtimeSkyMaterial.HasProperty("_Tint"))
+        {
+            runtimeSkyMaterial.SetColor("_Tint", tint);
+        }
+
+        if (runtimeSkyMaterial.HasProperty("_Exposure"))
+        {
+            runtimeSkyMaterial.SetFloat("_Exposure", exposure);
+        }
+
+        if (runtimeSkyMaterial.HasProperty("_Rotation"))
+        {
+            runtimeSkyMaterial.SetFloat("_Rotation", initialSkyRotation + Time.time * 0.12f);
+        }
+    }
+
+    private void EnsureCelestialBody()
+    {
+        if (celestialBody != null)
+        {
+            return;
+        }
+
+        celestialBody = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        celestialBody.name = "Moving Sun And Moon";
+        celestialBody.transform.SetParent(transform, true);
+
+        Collider bodyCollider = celestialBody.GetComponent<Collider>();
+
+        if (bodyCollider != null)
+        {
+            Destroy(bodyCollider);
+        }
+
+        celestialRenderer = celestialBody.GetComponent<Renderer>();
+
+        if (celestialRenderer == null)
+        {
+            return;
+        }
+
+        Shader shader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color") ?? Shader.Find("Standard");
+        celestialMaterial = new Material(shader)
+        {
+            name = "Island Celestial Body Material",
+            hideFlags = HideFlags.HideAndDontSave
+        };
+
+        celestialRenderer.sharedMaterial = celestialMaterial;
+        celestialRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        celestialRenderer.receiveShadows = false;
+        celestialRenderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+        celestialRenderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+    }
+
+    private void UpdateCelestialBody(bool night, float arc, float phase)
+    {
+        if (celestialBody == null || celestialMaterial == null || sunLight == null)
+        {
+            return;
+        }
+
+        if (playerCamera == null)
+        {
+            playerCamera = Camera.main;
+
+            if (playerCamera == null)
+            {
+                playerCamera = FindAnyObjectByType<Camera>();
+            }
+        }
+
+        if (playerCamera == null)
+        {
+            celestialBody.SetActive(false);
+            return;
+        }
+
+        celestialBody.SetActive(true);
+        float distance = night ? 420f : 500f;
+        float diameter = night ? 10f : Mathf.Lerp(14f, 17f, arc);
+        Quaternion visualOrbit = night
+            ? Quaternion.Euler(Mathf.Lerp(28f, 152f, phase), Mathf.Lerp(118f, 158f, phase), 0f)
+            : Quaternion.Euler(Mathf.Lerp(18f, 162f, phase), Mathf.Lerp(-68f, -18f, phase), 0f);
+        Vector3 skyDirection = -(visualOrbit * Vector3.forward).normalized;
+        celestialBody.transform.position = playerCamera.transform.position + skyDirection * distance;
+        celestialBody.transform.localScale = Vector3.one * diameter;
+
+        Color baseColor = night
+            ? new Color(0.58f, 0.72f, 1f, 1f)
+            : Color.Lerp(new Color(1f, 0.58f, 0.25f, 1f), new Color(1f, 0.92f, 0.72f, 1f), arc);
+        Color hdrColor = MultiplyRgb(baseColor, night ? 2.5f : Mathf.Lerp(4.5f, 3.4f, arc));
+
+        if (celestialMaterial.HasProperty("_BaseColor"))
+        {
+            celestialMaterial.SetColor("_BaseColor", hdrColor);
+        }
+
+        if (celestialMaterial.HasProperty("_Color"))
+        {
+            celestialMaterial.SetColor("_Color", hdrColor);
+        }
+
+        if (celestialMaterial.HasProperty("_EmissionColor"))
+        {
+            celestialMaterial.EnableKeyword("_EMISSION");
+            celestialMaterial.SetColor("_EmissionColor", hdrColor);
+        }
+    }
+
+    private void ApplyWaterAppearance(bool night, float arc)
+    {
+        if (waterSurface == null)
+        {
+            waterSurface = FindAnyObjectByType<OceanWaterSurface>();
+        }
+
+        waterSurface?.ApplyAtmosphere(night, arc);
+    }
+
+    private static Color MultiplyRgb(Color color, float multiplier)
+    {
+        return new Color(color.r * multiplier, color.g * multiplier, color.b * multiplier, color.a);
     }
 
     private void ShowStatus(string message)

@@ -76,12 +76,12 @@ MonoBehaviour:
     Downsample: 0
     AfterOpaque: 0
     Source: 1
-    NormalSamples: 1
-    Intensity: 0.4
-    DirectLightingStrength: 0.25
-    Radius: 0.3
-    Samples: 1
-    BlurQuality: 0
+    NormalSamples: 2
+    Intensity: 0.78
+    DirectLightingStrength: 0.08
+    Radius: 0.36
+    Samples: 2
+    BlurQuality: 2
     Falloff: 100
     SampleCount: -1
   m_BlueNoise256Textures:

@@ -5,6 +5,17 @@ using UnityEngine;
 public static class GameSaveSystem
 {
     private const string SaveKey = "MetalDetector.Save.Json";
+    private const int DefaultDetectorUpgradeCost = 250;
+    private const int DetectorUpgradeCostIncrease = 350;
+    private const int DefaultRangeUpgradeCost = 140;
+    private const int RangeUpgradeCostIncrease = 90;
+    private const int DefaultInventoryUpgradeCost = 220;
+    private const int InventoryUpgradeCostIncrease = 180;
+    private const int DefaultShovelUpgradeCost = 550;
+    private const int DefaultCraftingUnlockCost = 100;
+    private const int TrailerMinimumMoney = 1000;
+    private const float DefaultDetectorRange = 6f;
+    private const float RangeUpgradeStep = 2f;
 
     private static GameSaveData initialDefaults;
     private static GameSaveData pauseResumeSnapshot;
@@ -183,16 +194,10 @@ public static class GameSaveSystem
 
         if (detector != null)
         {
-            data.detectorRange = detector.detectionRange;
+            data.detectorRange = detector.DetectionRange;
             data.detectorTier = detector.detectorTier;
         }
 
-        DetectorBattery battery = PlayerRigReferences.FindLocalDetectorBattery();
-
-        if (battery != null)
-        {
-            data.detectorBatteryCharge = battery.charge;
-        }
     }
 
     private static void CaptureShop(GameSaveData data)
@@ -209,6 +214,8 @@ public static class GameSaveSystem
         data.inventoryUpgradeCost = shop.inventoryUpgradeCost;
         data.shovelUpgradeCost = shop.shovelUpgradeCost;
         data.shovelUpgraded = shop.shovelUpgraded;
+        data.craftingUnlockCost = shop.craftingUnlockCost;
+        data.craftingUnlocked = shop.craftingUnlocked;
     }
 
     private static void CaptureDayNight(GameSaveData data)
@@ -412,7 +419,7 @@ public static class GameSaveSystem
         }
 
         inventory.SetOpen(false);
-        inventory.money = Mathf.Max(0, data.money);
+        inventory.money = Mathf.Max(TrailerMinimumMoney, data.money);
         inventory.maxGridSize = Mathf.Max(3, data.maxGridSize);
         inventory.gridSize = Mathf.Clamp(data.gridSize <= 0 ? 3 : data.gridSize, 3, inventory.maxGridSize);
         inventory.items.Clear();
@@ -429,16 +436,10 @@ public static class GameSaveSystem
 
         if (detector != null)
         {
-            detector.detectionRange = data.detectorRange > 0f ? data.detectorRange : 6f;
-            detector.detectorTier = Mathf.Max(0, data.detectorTier);
+            detector.detectorTier = Mathf.Clamp(data.detectorTier, 0, detector.MaxDetectorTier);
+            detector.detectionRange = detector.GetSignalRangeForTier(detector.DetectorTier);
         }
 
-        DetectorBattery battery = PlayerRigReferences.FindLocalDetectorBattery();
-
-        if (battery != null)
-        {
-            battery.charge = Mathf.Clamp(data.detectorBatteryCharge > 0f ? data.detectorBatteryCharge : battery.maxCharge, 0f, battery.maxCharge);
-        }
     }
 
     private static void ApplyShop(GameSaveData data)
@@ -450,12 +451,37 @@ public static class GameSaveSystem
             return;
         }
 
-        shop.detectorUpgradeCost = data.detectorUpgradeCost > 0 ? data.detectorUpgradeCost : 75;
-        shop.rangeUpgradeCost = data.rangeUpgradeCost > 0 ? data.rangeUpgradeCost : 75;
-        shop.inventoryUpgradeCost = data.inventoryUpgradeCost > 0 ? data.inventoryUpgradeCost : 120;
-        shop.shovelUpgradeCost = data.shovelUpgradeCost > 0 ? data.shovelUpgradeCost : 160;
+        shop.detectorUpgradeCost = Mathf.Max(data.detectorUpgradeCost, GetExpectedDetectorUpgradeCost());
+        shop.rangeUpgradeCost = Mathf.Max(data.rangeUpgradeCost, GetExpectedRangeUpgradeCost());
+        shop.inventoryUpgradeCost = Mathf.Max(data.inventoryUpgradeCost, GetExpectedInventoryUpgradeCost());
+        shop.shovelUpgradeCost = Mathf.Max(data.shovelUpgradeCost, DefaultShovelUpgradeCost);
         shop.shovelUpgraded = data.shovelUpgraded;
+        shop.craftingUnlockCost = DefaultCraftingUnlockCost;
+        shop.craftingUnlocked = data.craftingUnlocked;
         shop.SetMenuOpen(false);
+    }
+
+    private static int GetExpectedDetectorUpgradeCost()
+    {
+        MetalDetector detector = PlayerRigReferences.FindLocalMetalDetector();
+        int tier = detector != null ? detector.DetectorTier : 0;
+        return DefaultDetectorUpgradeCost + (tier * DetectorUpgradeCostIncrease);
+    }
+
+    private static int GetExpectedRangeUpgradeCost()
+    {
+        MetalDetector detector = PlayerRigReferences.FindLocalMetalDetector();
+        float range = detector != null ? detector.DetectionRange : DefaultDetectorRange;
+        int upgrades = Mathf.Max(0, Mathf.RoundToInt((range - DefaultDetectorRange) / RangeUpgradeStep));
+        return DefaultRangeUpgradeCost + (upgrades * RangeUpgradeCostIncrease);
+    }
+
+    private static int GetExpectedInventoryUpgradeCost()
+    {
+        PlayerInventory inventory = PlayerRigReferences.FindLocalInventory();
+        int gridSize = inventory != null ? inventory.gridSize : 3;
+        int upgrades = Mathf.Max(0, gridSize - 3);
+        return DefaultInventoryUpgradeCost + (upgrades * InventoryUpgradeCostIncrease);
     }
 
     private static UpgradeShop FindUpgradeShop()
@@ -511,6 +537,11 @@ public static class GameSaveSystem
 
         foreach (SavedTreasure treasure in data.treasures)
         {
+            if (IsRemovedLootItem(treasure.itemName))
+            {
+                continue;
+            }
+
             RestoreTreasure(spawner, treasure);
         }
 
@@ -665,9 +696,7 @@ public static class GameSaveSystem
             return null;
         }
 
-        return FindIconInDefinitions(database.treasures, itemName)
-            ?? FindIconInDefinitions(database.generalTerrainTreasures, itemName)
-            ?? FindIconInDefinitions(database.searchAreaTreasures, itemName);
+        return FindIconInDefinitions(database.GetAllIconDefinitions(), itemName);
     }
 
     private static bool IsKnownTreasureItem(string itemName)
@@ -679,9 +708,7 @@ public static class GameSaveSystem
             return IsRuntimeDefaultTreasureName(itemName);
         }
 
-        return HasTreasureDefinition(database.treasures, itemName)
-            || HasTreasureDefinition(database.generalTerrainTreasures, itemName)
-            || HasTreasureDefinition(database.searchAreaTreasures, itemName);
+        return HasTreasureDefinition(database.GetAllTreasures(), itemName);
     }
 
     private static TreasureDatabase FindTreasureDatabase()
@@ -697,9 +724,11 @@ public static class GameSaveSystem
             return false;
         }
 
+        string lookupName = GetTreasureLookupAlias(itemName);
+
         foreach (TreasureDefinition definition in definitions)
         {
-            if (definition != null && definition.treasureName == itemName)
+            if (definition != null && (definition.treasureName == itemName || definition.treasureName == lookupName))
             {
                 return true;
             }
@@ -718,7 +747,6 @@ public static class GameSaveSystem
             case "Crushed Can":
             case "Small Coin":
             case "Bent Spoon":
-            case "Lost Key":
             case "Watch Fragment":
             case "Pocket Watch":
             case "Silver Ring":
@@ -739,15 +767,55 @@ public static class GameSaveSystem
             return null;
         }
 
+        string lookupName = GetTreasureLookupAlias(itemName);
+
         foreach (TreasureDefinition definition in definitions)
         {
-            if (definition != null && definition.treasureName == itemName)
+            if (definition != null && (definition.treasureName == itemName || definition.treasureName == lookupName))
             {
                 return definition.icon;
             }
         }
 
         return null;
+    }
+
+    private static string GetTreasureLookupAlias(string itemName)
+    {
+        return itemName == "Gold Ring" ? "Plain Gold Wedding Band" : itemName;
+    }
+
+    private static bool IsRemovedLootItem(string itemName)
+    {
+        if (string.IsNullOrWhiteSpace(itemName))
+        {
+            return false;
+        }
+
+        if (itemName.IndexOf("key", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+
+        switch (itemName.Trim().ToLowerInvariant())
+        {
+            case "metal plate":
+            case "metal lighter":
+            case "old lighter":
+            case "small screwdriver":
+            case "old hammer":
+            case "small chisel":
+            case "saw fragment":
+            case "metal file":
+            case "old forged nail":
+            case "small sheathed fishing knife":
+            case "old toy car":
+            case "rusty open end wrench":
+            case "small adjustable wrench":
+                return true;
+            default:
+                return false;
+        }
     }
 
     [Serializable]
@@ -761,14 +829,15 @@ public static class GameSaveSystem
         public int gridSize = 3;
         public int maxGridSize = 5;
         public List<SavedInventoryItem> inventoryItems = new List<SavedInventoryItem>();
-        public float detectorRange = 6f;
+        public float detectorRange = DefaultDetectorRange;
         public int detectorTier;
-        public float detectorBatteryCharge = 100f;
-        public int detectorUpgradeCost = 75;
-        public int rangeUpgradeCost = 75;
-        public int inventoryUpgradeCost = 120;
-        public int shovelUpgradeCost = 160;
+        public int detectorUpgradeCost = DefaultDetectorUpgradeCost;
+        public int rangeUpgradeCost = DefaultRangeUpgradeCost;
+        public int inventoryUpgradeCost = DefaultInventoryUpgradeCost;
+        public int shovelUpgradeCost = DefaultShovelUpgradeCost;
         public bool shovelUpgraded;
+        public int craftingUnlockCost = DefaultCraftingUnlockCost;
+        public bool craftingUnlocked;
         public int dayNumber = 1;
         public bool isNight;
         public float phase01;

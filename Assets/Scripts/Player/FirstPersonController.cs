@@ -34,7 +34,7 @@ public class FirstPersonController : MonoBehaviour
 
     void Update()
     {
-        if (GameUIState.AnyMenuOpen)
+        if (GameUIState.AnyBlockingUIOpen)
         {
             return;
         }

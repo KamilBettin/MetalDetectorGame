@@ -1,10 +1,13 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public class TutorialQuestSystem : MonoBehaviour
 {
-    public int scannedCellsGoal = 5;
+    [FormerlySerializedAs("scannedCellsGoal")]
+    public int groundScansGoal = 5;
 
-    public int scannedCells;
+    [FormerlySerializedAs("scannedCells")]
+    public int groundScans;
     public bool foundFirstTreasure;
     public bool soldFirstLoot;
 
@@ -12,9 +15,9 @@ public class TutorialQuestSystem : MonoBehaviour
     {
         get
         {
-            if (scannedCells < scannedCellsGoal)
+            if (groundScans < groundScansGoal)
             {
-                return GameLocalization.TFormat("tutorial.scan_sand", scannedCells, scannedCellsGoal);
+                return GameLocalization.TFormat("tutorial.scan_sand", groundScans, groundScansGoal);
             }
 
             if (!foundFirstTreasure)
@@ -35,9 +38,9 @@ public class TutorialQuestSystem : MonoBehaviour
     {
         get
         {
-            if (scannedCells < scannedCellsGoal)
+            if (groundScans < groundScansGoal)
             {
-                return scannedCellsGoal <= 0 ? 1f : Mathf.Clamp01(scannedCells / (float)scannedCellsGoal);
+                return groundScansGoal <= 0 ? 1f : Mathf.Clamp01(groundScans / (float)groundScansGoal);
             }
 
             if (!foundFirstTreasure)
@@ -51,21 +54,21 @@ public class TutorialQuestSystem : MonoBehaviour
 
     private void OnEnable()
     {
-        GameEvents.ScannedCellsChanged += HandleScannedCellsChanged;
+        GameEvents.GroundScansChanged += HandleGroundScansChanged;
         GameEvents.TreasureFound += HandleTreasureFound;
         GameEvents.TreasuresSold += HandleTreasuresSold;
     }
 
     private void OnDisable()
     {
-        GameEvents.ScannedCellsChanged -= HandleScannedCellsChanged;
+        GameEvents.GroundScansChanged -= HandleGroundScansChanged;
         GameEvents.TreasureFound -= HandleTreasureFound;
         GameEvents.TreasuresSold -= HandleTreasuresSold;
     }
 
-    private void HandleScannedCellsChanged(int totalScannedCells)
+    private void HandleGroundScansChanged(int totalScans)
     {
-        scannedCells = Mathf.Max(scannedCells, totalScannedCells);
+        groundScans = Mathf.Max(groundScans, totalScans);
     }
 
     private void HandleTreasureFound(DetectableTreasure treasure)

@@ -29,9 +29,9 @@ public class DetectableTreasure : MonoBehaviour
         revealMarker = marker;
     }
 
-    public bool DigOnce()
+    public bool DigOnce(int hitPower = 1)
     {
-        currentDigHits = Mathf.Min(currentDigHits + 1, Mathf.Max(1, requiredDigHits));
+        currentDigHits = Mathf.Min(currentDigHits + Mathf.Max(1, hitPower), Mathf.Max(1, requiredDigHits));
         return IsDugUp;
     }
 }

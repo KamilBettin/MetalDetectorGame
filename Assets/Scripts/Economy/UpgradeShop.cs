@@ -10,18 +10,21 @@ public class UpgradeShop : MonoBehaviour
     public bool allowUpgrades = true;
     public string shopDisplayName = "Trader";
 
-    public int detectorUpgradeCost = 75;
-    public int rangeUpgradeCost = 75;
-    public int costIncrease = 50;
+    public int detectorUpgradeCost = 250;
+    public int detectorCostIncrease = 350;
+    public int rangeUpgradeCost = 140;
+    public int rangeCostIncrease = 90;
     public float rangeIncrease = 2f;
-    public float maxDetectionRange = 18f;
-    public int inventoryUpgradeCost = 120;
-    public int inventoryCostIncrease = 100;
-    public int shovelUpgradeCost = 160;
+    public float maxDetectionRange = 14f;
+    public int inventoryUpgradeCost = 220;
+    public int inventoryCostIncrease = 180;
+    public int shovelUpgradeCost = 550;
     public bool shovelUpgraded;
+    public int craftingUnlockCost = 100;
+    public bool craftingUnlocked;
     public float interactionDistance = 3f;
     public string locationName = "Forest";
-    public int locationCost = 350;
+    public int locationCost = 650;
     public bool locationUnlocked;
 
     private string shopMessage = "";
@@ -103,6 +106,7 @@ public class UpgradeShop : MonoBehaviour
         }
 
         ShowMessage(GameLocalization.TFormat("shop.msg_sold_treasures", earnedMoney));
+        GameSfx.PlaySell();
         GameEvents.ReportTreasuresSold(soldCount);
         LocalCoopManager.Instance?.ReportTeamStateChanged();
     }
@@ -133,6 +137,7 @@ public class UpgradeShop : MonoBehaviour
         }
 
         ShowMessage(GameLocalization.TFormat("shop.msg_sold_item", item.itemName, item.value));
+        GameSfx.PlaySell();
         GameEvents.ReportTreasuresSold(1);
         LocalCoopManager.Instance?.ReportTeamStateChanged();
     }
@@ -170,8 +175,9 @@ public class UpgradeShop : MonoBehaviour
 
         metalDetector.IncreaseRange(rangeIncrease);
         ShowMessage(GameLocalization.TFormat("shop.msg_range_upgraded", metalDetector.DetectionRange.ToString("0.#")));
+        GameSfx.PlayUpgrade();
 
-        rangeUpgradeCost += costIncrease;
+        rangeUpgradeCost += rangeCostIncrease;
         LocalCoopManager.Instance?.ReportTeamStateChanged();
     }
 
@@ -207,9 +213,32 @@ public class UpgradeShop : MonoBehaviour
         }
 
         metalDetector.TryUpgradeDetector();
-        ShowMessage(GameLocalization.TFormat("shop.msg_detector_upgraded", metalDetector.CurrentDetectorName, metalDetector.CurrentScanCells));
-        detectorUpgradeCost += costIncrease;
+        RefreshTreasuresForDetectorUpgrade();
+        ShowMessage(GameLocalization.TFormat("shop.msg_detector_upgraded", metalDetector.CurrentDetectorName));
+        GameSfx.PlayUpgrade();
+        detectorUpgradeCost += detectorCostIncrease;
         LocalCoopManager.Instance?.ReportTeamStateChanged();
+    }
+
+    private void RefreshTreasuresForDetectorUpgrade()
+    {
+        TreasureSpawner treasureSpawner = FindAnyObjectByType<TreasureSpawner>();
+
+        if (treasureSpawner != null)
+        {
+            int daySeed = DayNightCycle.Instance != null ? DayNightCycle.Instance.DayNumber : 0;
+            treasureSpawner.RegenerateTreasures(daySeed);
+        }
+
+        GroundScanner[] scanners = FindObjectsByType<GroundScanner>();
+
+        foreach (GroundScanner scanner in scanners)
+        {
+            if (scanner != null)
+            {
+                scanner.ClearScannedArea();
+            }
+        }
     }
 
     public void TryBuyInventoryUpgrade()
@@ -239,6 +268,7 @@ public class UpgradeShop : MonoBehaviour
 
         playerInventory.TryUpgradeGrid();
         ShowMessage(GameLocalization.TFormat("shop.msg_backpack_upgraded", playerInventory.gridSize));
+        GameSfx.PlayUpgrade();
 
         inventoryUpgradeCost += inventoryCostIncrease;
         LocalCoopManager.Instance?.ReportTeamStateChanged();
@@ -271,6 +301,38 @@ public class UpgradeShop : MonoBehaviour
 
         shovelUpgraded = true;
         ShowMessage(GameLocalization.T("shop.msg_shovel_equipped"));
+        GameSfx.PlayUpgrade();
+        LocalCoopManager.Instance?.ReportTeamStateChanged();
+    }
+
+    public void TryBuyCraftingUnlock()
+    {
+        if (!allowUpgrades)
+        {
+            ShowMessage(GameLocalization.T("shop.msg_only_buys"));
+            return;
+        }
+
+        if (!CanUseShop())
+        {
+            return;
+        }
+
+        if (craftingUnlocked)
+        {
+            ShowMessage(GameLocalization.T("shop.msg_crafting_already"));
+            return;
+        }
+
+        if (!playerInventory.TrySpendMoney(craftingUnlockCost))
+        {
+            ShowMessage(GameLocalization.TFormat("shop.msg_not_enough", craftingUnlockCost));
+            return;
+        }
+
+        craftingUnlocked = true;
+        ShowMessage(GameLocalization.T("shop.msg_crafting_unlocked"));
+        GameSfx.PlayUpgrade();
         LocalCoopManager.Instance?.ReportTeamStateChanged();
     }
 
@@ -346,7 +408,7 @@ public class UpgradeShop : MonoBehaviour
             ? metalDetector.DetectionRange.ToString("0.#") + "m"
             : GameLocalization.T("shop.msg_not_connected");
         string detectorUpgradeText = metalDetector != null && metalDetector.CanUpgradeDetector
-            ? GameLocalization.TFormat("shop.upgrade_detector_to", metalDetector.GetDetectorName(metalDetector.DetectorTier + 1), metalDetector.GetScanCellsForTier(metalDetector.DetectorTier + 1), detectorUpgradeCost)
+            ? GameLocalization.TFormat("shop.upgrade_detector_to", metalDetector.GetDetectorName(metalDetector.DetectorTier + 1), detectorUpgradeCost)
             : GameLocalization.T("shop.detector_model_maxed");
         string inventoryUpgradeText = playerInventory.CanUpgradeGrid()
             ? GameLocalization.TFormat("shop.upgrade_backpack_to", playerInventory.gridSize, playerInventory.gridSize + 1, inventoryUpgradeCost)
@@ -354,8 +416,11 @@ public class UpgradeShop : MonoBehaviour
         string shovelUpgradeText = shovelUpgraded
             ? GameLocalization.T("shop.msg_shovel_equipped")
             : GameLocalization.TFormat("shop.upgrade_shovel", shovelUpgradeCost);
+        string craftingUnlockText = craftingUnlocked
+            ? GameLocalization.T("shop.crafting_unlocked")
+            : GameLocalization.TFormat("shop.unlock_crafting", craftingUnlockCost);
 
-        Rect panelRect = new Rect(Screen.width * 0.5f - 230f, Screen.height * 0.5f - 190f, 460f, 380f);
+        Rect panelRect = new Rect(Screen.width * 0.5f - 230f, Screen.height * 0.5f - 210f, 460f, 420f);
         GameGui.DrawPanel(panelRect, shopDisplayName);
         GUI.Label(new Rect(panelRect.x + 24f, panelRect.y + 44f, 390f, 22f), GameLocalization.TFormat("shop.money_cargo", playerInventory.money, playerInventory.GetInventoryValue()), GameGui.LabelStyle);
         GUI.Label(new Rect(panelRect.x + 24f, panelRect.y + 68f, 390f, 22f), GameLocalization.TFormat("shop.detector_range", rangeText), GameGui.SmallLabelStyle);
@@ -381,7 +446,12 @@ public class UpgradeShop : MonoBehaviour
             TryBuyShovelUpgrade();
         }
 
-        if (allowUpgrades && GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 296f, 412f, 34f), GameLocalization.T("shop.buy_land_signs")))
+        if (allowUpgrades && GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 296f, 412f, 34f), craftingUnlockText))
+        {
+            TryBuyCraftingUnlock();
+        }
+
+        if (allowUpgrades && GameGui.Button(new Rect(panelRect.x + 24f, panelRect.y + 338f, 412f, 34f), GameLocalization.T("shop.buy_land_signs")))
         {
             TryBuyLocation();
         }
@@ -390,5 +460,74 @@ public class UpgradeShop : MonoBehaviour
         {
             GameGui.DrawToast(new Rect(panelRect.x, panelRect.y + panelRect.height + 10f, panelRect.width, 38f), shopMessage);
         }
+    }
+}
+
+public static class GameSfx
+{
+    private const string SellClipPath = "Audio/SFX/sell-coins";
+    private const string UpgradeClipPath = "Audio/SFX/upgrade-level-up";
+    private const float SellVolume = 0.78f;
+    private const float UpgradeVolume = 0.82f;
+
+    private static AudioSource audioSource;
+    private static AudioClip sellClip;
+    private static AudioClip upgradeClip;
+
+    public static void PlaySell()
+    {
+        Play(GetSellClip(), SellVolume);
+    }
+
+    public static void PlayUpgrade()
+    {
+        Play(GetUpgradeClip(), UpgradeVolume);
+    }
+
+    private static AudioClip GetSellClip()
+    {
+        if (sellClip == null)
+        {
+            sellClip = Resources.Load<AudioClip>(SellClipPath);
+        }
+
+        return sellClip;
+    }
+
+    private static AudioClip GetUpgradeClip()
+    {
+        if (upgradeClip == null)
+        {
+            upgradeClip = Resources.Load<AudioClip>(UpgradeClipPath);
+        }
+
+        return upgradeClip;
+    }
+
+    private static void Play(AudioClip clip, float volume)
+    {
+        if (clip == null)
+        {
+            return;
+        }
+
+        EnsureAudioSource();
+        audioSource.PlayOneShot(clip, volume);
+    }
+
+    private static void EnsureAudioSource()
+    {
+        if (audioSource != null)
+        {
+            return;
+        }
+
+        GameObject audioObject = new GameObject("Game SFX Audio");
+        Object.DontDestroyOnLoad(audioObject);
+
+        audioSource = audioObject.AddComponent<AudioSource>();
+        audioSource.playOnAwake = false;
+        audioSource.spatialBlend = 0f;
+        audioSource.volume = 1f;
     }
 }

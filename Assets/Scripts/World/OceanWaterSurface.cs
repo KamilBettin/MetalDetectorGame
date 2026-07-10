@@ -56,6 +56,41 @@ public class OceanWaterSurface : MonoBehaviour
         UpdateWaterSurface();
     }
 
+    public void ApplyAtmosphere(bool night, float skyArc)
+    {
+        CacheComponents();
+
+        if (meshRenderer == null || meshRenderer.sharedMaterial == null)
+        {
+            return;
+        }
+
+        float arc = Mathf.Clamp01(skyArc);
+
+        if (night)
+        {
+            deepColor = Color.Lerp(new Color(0.008f, 0.03f, 0.075f, 0.9f), new Color(0.012f, 0.055f, 0.12f, 0.88f), arc);
+            shallowColor = Color.Lerp(new Color(0.02f, 0.075f, 0.13f, 0.8f), new Color(0.035f, 0.13f, 0.2f, 0.78f), arc);
+            foamColor = new Color(0.48f, 0.62f, 0.74f, 1f);
+            sparkle = Mathf.Lerp(0.2f, 0.36f, arc);
+        }
+        else
+        {
+            deepColor = Color.Lerp(new Color(0.025f, 0.15f, 0.21f, 0.88f), new Color(0.012f, 0.22f, 0.3f, 0.86f), arc);
+            shallowColor = Color.Lerp(new Color(0.09f, 0.31f, 0.35f, 0.78f), new Color(0.09f, 0.45f, 0.5f, 0.74f), arc);
+            foamColor = Color.Lerp(new Color(0.7f, 0.77f, 0.72f, 1f), new Color(0.76f, 0.92f, 0.9f, 1f), arc);
+            sparkle = Mathf.Lerp(0.55f, 0.82f, arc);
+        }
+
+        Material material = meshRenderer.sharedMaterial;
+        SetColor(material, "_Color", deepColor);
+        SetColor(material, "_BaseColor", deepColor);
+        SetColor(material, "_DeepColor", deepColor);
+        SetColor(material, "_ShallowColor", shallowColor);
+        SetColor(material, "_FoamColor", foamColor);
+        SetFloat(material, "_Sparkle", sparkle);
+    }
+
     private void OnDisable()
     {
         if (Application.isPlaying && waterMesh != null)

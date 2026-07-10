@@ -52,6 +52,9 @@ public static class GameBootstrapper
             new GameObject("Local Coop Manager").AddComponent<LocalCoopManager>();
         }
 
+        LoadingScreenUI.EnsureExists();
+        EnsureEventSystem();
+
         if (Object.FindAnyObjectByType<PauseMenuUI>() == null)
         {
             new GameObject("Pause Menu UI").AddComponent<PauseMenuUI>();
@@ -78,6 +81,7 @@ public static class GameBootstrapper
             RunBootstrapStep("local player avatar", EnsureLocalPlayerAvatarVisual);
             RunBootstrapStep("event system", EnsureEventSystem);
             RunBootstrapStep("home interior exit", SceneTransitionManager.EnsureInteriorExitPortal);
+            RunBootstrapStep("home interior stations", HomeInteractionStationBootstrapper.EnsureHomeInteriorStations);
             RunBootstrapStep("post processing", PostProcessingBootstrapper.EnsurePostProcessing);
             return;
         }
@@ -146,6 +150,7 @@ public static class GameBootstrapper
             if (Time.unscaledTime >= stopTime)
             {
                 enabled = false;
+                LoadingScreenUI.HideAfterMinimum(0.1f);
                 return;
             }
 
@@ -156,6 +161,8 @@ public static class GameBootstrapper
 
             nextRunTime = Time.unscaledTime + RetryInterval;
             EnsureSceneObjects();
+
+            LoadingScreenUI.HideAfterMinimum(0.2f);
         }
     }
 
@@ -170,13 +177,6 @@ public static class GameBootstrapper
 
         EnsureDetectorVisual();
 
-        DetectorBattery battery = metalDetector.GetComponent<DetectorBattery>();
-
-        if (battery == null)
-        {
-            battery = metalDetector.gameObject.AddComponent<DetectorBattery>();
-        }
-
         GroundScanner scanner = metalDetector.GetComponent<GroundScanner>();
 
         if (scanner == null)
@@ -190,7 +190,6 @@ public static class GameBootstrapper
         }
 
         scanner.scanOrigin = metalDetector.detectorHead != null ? metalDetector.detectorHead : metalDetector.transform;
-        scanner.detectorBattery = battery;
     }
 
     private static void EnsureDetectorVisual()
@@ -265,21 +264,27 @@ public static class PostProcessingBootstrapper
             return;
         }
 
-        EnsureCameraPostProcessing(camera);
-        DisableLegacyCameraEffects(camera);
-        DisableSceneFog();
+        ConfigurePostProcessingCameras(camera);
         EnsureVolumeObject();
+        DisableConflictingVolumes();
 
-        bool useInteriorLook = SceneTransitionManager.IsHomeInteriorActive;
-        VolumeProfile targetProfile = useInteriorLook ? GetInteriorProfile() : GetIslandProfile();
-
-        volume.sharedProfile = targetProfile;
-        volume.enabled = true;
+        bool isInterior = SceneTransitionManager.IsHomeInteriorActive;
         volume.isGlobal = true;
         volume.priority = VolumePriority;
         volume.weight = 1f;
-        volume.blendDistance = 0f;
-        volumeObject.name = useInteriorLook ? VolumeObjectName + " (Home)" : VolumeObjectName + " (Island)";
+        volume.sharedProfile = isInterior ? GetInteriorProfile() : GetIslandProfile();
+        volume.enabled = true;
+
+        if (isInterior)
+        {
+            DisableSceneFog();
+            return;
+        }
+
+        DayNightCycle cycle = DayNightCycle.Instance;
+        float phase = cycle != null ? cycle.Phase01 : 0.45f;
+        bool isNight = cycle != null && cycle.IsNight;
+        ApplyIslandAtmosphere(phase, isNight, Mathf.Sin(phase * Mathf.PI));
     }
 
     private static bool IsUniversalRenderPipelineActive()
@@ -328,7 +333,7 @@ public static class PostProcessingBootstrapper
         return null;
     }
 
-    private static void EnsureCameraPostProcessing(Camera camera)
+    private static void DisableCameraPostProcessing(Camera camera)
     {
         UniversalAdditionalCameraData cameraData = camera.GetComponent<UniversalAdditionalCameraData>();
 
@@ -337,13 +342,51 @@ public static class PostProcessingBootstrapper
             cameraData = camera.gameObject.AddComponent<UniversalAdditionalCameraData>();
         }
 
-        cameraData.renderPostProcessing = true;
+        cameraData.renderPostProcessing = false;
         cameraData.antialiasing = AntialiasingMode.None;
         cameraData.antialiasingQuality = AntialiasingQuality.Low;
         cameraData.stopNaN = true;
+        cameraData.dithering = false;
+        cameraData.volumeTrigger = camera.transform;
+        cameraData.volumeLayerMask = 0;
+    }
+
+    private static void EnableCameraPostProcessing(Camera camera)
+    {
+        UniversalAdditionalCameraData cameraData = camera.GetComponent<UniversalAdditionalCameraData>();
+
+        if (cameraData == null)
+        {
+            cameraData = camera.gameObject.AddComponent<UniversalAdditionalCameraData>();
+        }
+
+        int volumeLayer = GetVolumeLayer();
+        cameraData.renderPostProcessing = true;
+        cameraData.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
+        cameraData.antialiasingQuality = AntialiasingQuality.High;
+        cameraData.stopNaN = true;
         cameraData.dithering = true;
         cameraData.volumeTrigger = camera.transform;
-        cameraData.volumeLayerMask |= 1 << GetVolumeLayer();
+        cameraData.volumeLayerMask = volumeLayer >= 0 ? 1 << volumeLayer : ~0;
+    }
+
+    private static void ConfigurePostProcessingCameras(Camera primaryCamera)
+    {
+        EnableCameraPostProcessing(primaryCamera);
+        DisableLegacyCameraEffects(primaryCamera);
+
+        Camera[] cameras = Object.FindObjectsByType<Camera>();
+
+        foreach (Camera camera in cameras)
+        {
+            if (camera == null || camera == primaryCamera)
+            {
+                continue;
+            }
+
+            DisableCameraPostProcessing(camera);
+            DisableLegacyCameraEffects(camera);
+        }
     }
 
     private static void DisableLegacyCameraEffects(Camera camera)
@@ -416,6 +459,22 @@ public static class PostProcessingBootstrapper
         }
     }
 
+    private static void DisableConflictingVolumes()
+    {
+        Volume[] sceneVolumes = Object.FindObjectsByType<Volume>();
+
+        foreach (Volume sceneVolume in sceneVolumes)
+        {
+            if (sceneVolume == null || sceneVolume == volume)
+            {
+                continue;
+            }
+
+            sceneVolume.enabled = false;
+            sceneVolume.weight = 0f;
+        }
+    }
+
     private static int GetVolumeLayer()
     {
         return LayerMask.NameToLayer("Default");
@@ -455,17 +514,17 @@ public static class PostProcessingBootstrapper
     {
         ConfigureCommonProfile(
             profile,
-            postExposure: 0.16f,
+            postExposure: 0.08f,
             contrast: 7f,
-            saturation: 6f,
-            colorFilter: new Color(1f, 0.995f, 0.965f),
-            temperature: 2f,
-            tint: -1f,
-            bloomIntensity: 0.1f,
-            bloomThreshold: 1.2f,
-            bloomScatter: 0.42f,
-            vignetteIntensity: 0.08f,
-            vignetteSmoothness: 0.42f,
+            saturation: 7f,
+            colorFilter: new Color(1f, 0.985f, 0.94f),
+            temperature: 5f,
+            tint: 0f,
+            bloomIntensity: 0.16f,
+            bloomThreshold: 1.05f,
+            bloomScatter: 0.52f,
+            vignetteIntensity: 0.09f,
+            vignetteSmoothness: 0.44f,
             grainIntensity: 0f);
     }
 
@@ -503,7 +562,7 @@ public static class PostProcessingBootstrapper
         float grainIntensity)
     {
         Tonemapping tonemapping = Add<Tonemapping>(profile);
-        tonemapping.mode.Override(TonemappingMode.Neutral);
+        tonemapping.mode.Override(TonemappingMode.ACES);
 
         ColorAdjustments colorAdjustments = Add<ColorAdjustments>(profile);
         colorAdjustments.postExposure.Override(postExposure);
@@ -537,6 +596,96 @@ public static class PostProcessingBootstrapper
         filmGrain.intensity.Override(grainIntensity);
         filmGrain.response.Override(0.82f);
         filmGrain.active = grainIntensity > 0f;
+
+        ShadowsMidtonesHighlights colorWheels = Add<ShadowsMidtonesHighlights>(profile);
+        colorWheels.shadows.Override(new Vector4(0.96f, 1.01f, 1.06f, 0f));
+        colorWheels.midtones.Override(new Vector4(1f, 1f, 1f, 0f));
+        colorWheels.highlights.Override(new Vector4(1.04f, 1.015f, 0.97f, 0f));
+        colorWheels.shadowsStart.Override(0f);
+        colorWheels.shadowsEnd.Override(0.34f);
+        colorWheels.highlightsStart.Override(0.58f);
+        colorWheels.highlightsEnd.Override(1f);
+    }
+
+    public static void ApplyIslandAtmosphere(float phase01, bool isNight, float skyArc)
+    {
+        if (!IsUniversalRenderPipelineActive() || SceneTransitionManager.IsHomeInteriorActive)
+        {
+            return;
+        }
+
+        float arc = Mathf.Clamp01(skyArc);
+        VolumeProfile profile = GetIslandProfile();
+
+        if (profile.TryGet(out ColorAdjustments colorAdjustments))
+        {
+            if (isNight)
+            {
+                colorAdjustments.postExposure.Override(Mathf.Lerp(-0.42f, -0.28f, arc));
+                colorAdjustments.contrast.Override(11f);
+                colorAdjustments.saturation.Override(-7f);
+                colorAdjustments.colorFilter.Override(Color.Lerp(new Color(0.72f, 0.8f, 1f), new Color(0.82f, 0.88f, 1f), arc));
+            }
+            else
+            {
+                colorAdjustments.postExposure.Override(Mathf.Lerp(0.025f, 0.11f, arc));
+                colorAdjustments.contrast.Override(Mathf.Lerp(6f, 8f, arc));
+                colorAdjustments.saturation.Override(Mathf.Lerp(5f, 8f, arc));
+                colorAdjustments.colorFilter.Override(Color.Lerp(new Color(1f, 0.91f, 0.82f), new Color(1f, 0.99f, 0.95f), arc));
+            }
+        }
+
+        if (profile.TryGet(out WhiteBalance whiteBalance))
+        {
+            whiteBalance.temperature.Override(isNight ? Mathf.Lerp(-22f, -14f, arc) : Mathf.Lerp(13f, 3f, arc));
+            whiteBalance.tint.Override(isNight ? -2f : 0f);
+        }
+
+        if (profile.TryGet(out Bloom bloom))
+        {
+            bloom.intensity.Override(isNight ? Mathf.Lerp(0.2f, 0.26f, arc) : Mathf.Lerp(0.2f, 0.14f, arc));
+            bloom.threshold.Override(isNight ? 0.82f : Mathf.Lerp(0.92f, 1.08f, arc));
+            bloom.tint.Override(isNight ? new Color(0.72f, 0.82f, 1f) : Color.Lerp(new Color(1f, 0.76f, 0.5f), Color.white, arc));
+        }
+
+        if (profile.TryGet(out Vignette vignette))
+        {
+            vignette.intensity.Override(isNight ? 0.16f : Mathf.Lerp(0.11f, 0.075f, arc));
+        }
+
+        if (profile.TryGet(out ShadowsMidtonesHighlights colorWheels))
+        {
+            if (isNight)
+            {
+                colorWheels.shadows.Override(new Vector4(0.82f, 0.9f, 1.12f, 0f));
+                colorWheels.midtones.Override(new Vector4(0.93f, 0.97f, 1.045f, 0f));
+                colorWheels.highlights.Override(new Vector4(0.92f, 0.98f, 1.1f, 0f));
+            }
+            else
+            {
+                colorWheels.shadows.Override(Vector4.Lerp(new Vector4(0.94f, 1f, 1.08f, 0f), new Vector4(0.96f, 1.015f, 1.055f, 0f), arc));
+                colorWheels.midtones.Override(new Vector4(1f, 1f, 1f, 0f));
+                colorWheels.highlights.Override(Vector4.Lerp(new Vector4(1.08f, 1.015f, 0.92f, 0f), new Vector4(1.035f, 1.01f, 0.975f, 0f), arc));
+            }
+        }
+
+        RenderSettings.fog = true;
+        RenderSettings.fogMode = FogMode.Linear;
+
+        if (isNight)
+        {
+            RenderSettings.fogColor = Color.Lerp(new Color(0.035f, 0.055f, 0.11f), new Color(0.055f, 0.085f, 0.16f), arc);
+            RenderSettings.fogStartDistance = Mathf.Lerp(90f, 120f, arc);
+            RenderSettings.fogEndDistance = Mathf.Lerp(500f, 610f, arc);
+            RenderSettings.subtractiveShadowColor = new Color(0.12f, 0.18f, 0.32f, 1f);
+        }
+        else
+        {
+            RenderSettings.fogColor = Color.Lerp(new Color(0.7f, 0.58f, 0.47f), new Color(0.55f, 0.72f, 0.8f), arc);
+            RenderSettings.fogStartDistance = Mathf.Lerp(125f, 210f, arc);
+            RenderSettings.fogEndDistance = Mathf.Lerp(650f, 900f, arc);
+            RenderSettings.subtractiveShadowColor = Color.Lerp(new Color(0.34f, 0.38f, 0.48f), new Color(0.3f, 0.39f, 0.5f), arc);
+        }
     }
 
     private static T Add<T>(VolumeProfile profile) where T : VolumeComponent
@@ -607,15 +756,4 @@ public static class PlayerRigReferences
         return Object.FindAnyObjectByType<MetalDetector>();
     }
 
-    public static DetectorBattery FindLocalDetectorBattery()
-    {
-        MetalDetector detector = FindLocalMetalDetector();
-
-        if (detector != null && detector.TryGetComponent(out DetectorBattery battery))
-        {
-            return battery;
-        }
-
-        return Object.FindAnyObjectByType<DetectorBattery>();
-    }
 }

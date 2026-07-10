@@ -11,7 +11,10 @@ public class DigSiteVisual : MonoBehaviour
     private const float SearchAnimationDuration = 1.18f;
     private const float SurfaceOffset = 0.0035f;
     private const float MaxSlopeAlignDegrees = 28f;
+    private const float ChestBuriedLocalY = -0.40f;
+    private const float ChestExposedLocalY = 0.02f;
     private const string ChestPrefabPath = "Assets/Treasure chest closed/treasure_chest_closed.prefab";
+    private const string ChestResourcePath = "TreasureChest/treasure_chest_closed";
     private const string SoilBasePath = "Assets/TerrainSampleAssets/Textures/Terrain/Soil_Rocks_BaseColor.tif";
     private const string SoilNormalPath = "Assets/TerrainSampleAssets/Textures/Terrain/Soil_Rocks_Normal.tif";
     private const string SoilMaskPath = "Assets/TerrainSampleAssets/Textures/Terrain/Soil_Rocks_MaskMap.tif";
@@ -19,6 +22,10 @@ public class DigSiteVisual : MonoBehaviour
     private const string ChestNormalPath = "Assets/Treasure chest closed/Materials and textures/treasure_chest_normal.tga";
     private const string ChestMetalSmoothPath = "Assets/Treasure chest closed/Materials and textures/treasure_chest_metal+smoo.tga";
     private const string ChestOcclusionPath = "Assets/Treasure chest closed/Materials and textures/treasure_chest_occlusion.tga";
+    private const string ChestBaseResourcePath = "TreasureChest/Textures/treasure_chest_albedo";
+    private const string ChestNormalResourcePath = "TreasureChest/Textures/treasure_chest_normal";
+    private const string ChestMetalSmoothResourcePath = "TreasureChest/Textures/treasure_chest_metal+smoo";
+    private const string ChestOcclusionResourcePath = "TreasureChest/Textures/treasure_chest_occlusion";
 
     private static Material cachedSoilMaterial;
     private static Material cachedChestMaterial;
@@ -319,18 +326,20 @@ public class DigSiteVisual : MonoBehaviour
             return;
         }
 
-        GameObject chestPrefab = configuredChestPrefab != null ? configuredChestPrefab : LoadEditorChestPrefab();
+        GameObject chestPrefab = configuredChestPrefab != null ? configuredChestPrefab : LoadChestPrefab();
         bool usingPrefabChest = chestPrefab != null;
         GameObject chestObject = chestPrefab != null ? Instantiate(chestPrefab) : CreateProceduralChest();
         chestObject.name = "Unearthed Treasure Chest";
         chestRoot = chestObject.transform;
         chestRoot.SetParent(transform, false);
         chestRoot.localRotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
+
         if (usingPrefabChest)
         {
             ApplyChestMaterials(chestObject);
         }
 
+        EnsureChestRenderersVisible(chestObject);
         NormalizeChestScale(chestObject, new Vector3(0.68f, 0.42f, 0.48f));
         chestBaseScale = chestRoot.localScale;
         DisableCollidersInChildren(chestObject);
@@ -437,7 +446,7 @@ public class DigSiteVisual : MonoBehaviour
             return;
         }
 
-        float y = Mathf.Lerp(-0.26f, 0.16f, Mathf.SmoothStep(0f, 1f, reveal));
+        float y = Mathf.Lerp(ChestBuriedLocalY, ChestExposedLocalY, Mathf.SmoothStep(0f, 1f, reveal));
         chestRoot.localPosition = new Vector3(0f, y, 0f);
         chestRoot.localScale = chestBaseScale * Mathf.Lerp(0.82f, 1f, reveal);
 
@@ -861,18 +870,33 @@ public class DigSiteVisual : MonoBehaviour
         return null;
     }
 
-    private static GameObject LoadEditorChestPrefab()
+    private static Texture2D LoadRuntimeTexture(string resourcePath, string editorPath)
     {
+        Texture2D texture = Resources.Load<Texture2D>(resourcePath);
+
+        if (texture != null)
+        {
+            return texture;
+        }
+
+        return LoadEditorTexture(editorPath);
+    }
+
+    private static GameObject LoadChestPrefab()
+    {
+        if (cachedEditorChestPrefab == null)
+        {
+            cachedEditorChestPrefab = Resources.Load<GameObject>(ChestResourcePath);
+        }
+
 #if UNITY_EDITOR
         if (cachedEditorChestPrefab == null)
         {
             cachedEditorChestPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(ChestPrefabPath);
         }
+#endif
 
         return cachedEditorChestPrefab;
-#else
-        return null;
-#endif
     }
 
     private static Texture2D CreateNoiseTexture(Color baseColor)
@@ -994,6 +1018,52 @@ public class DigSiteVisual : MonoBehaviour
         }
     }
 
+    private static void EnsureChestRenderersVisible(GameObject chestObject)
+    {
+        if (chestObject == null)
+        {
+            return;
+        }
+
+        Renderer[] renderers = chestObject.GetComponentsInChildren<Renderer>(true);
+        Material fallbackMaterial = GetChestMaterial();
+
+        foreach (Renderer targetRenderer in renderers)
+        {
+            if (targetRenderer == null)
+            {
+                continue;
+            }
+
+            targetRenderer.enabled = true;
+            targetRenderer.forceRenderingOff = false;
+            targetRenderer.allowOcclusionWhenDynamic = false;
+            targetRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+            targetRenderer.receiveShadows = true;
+
+            Material[] materials = targetRenderer.materials;
+
+            if (materials == null || materials.Length == 0)
+            {
+                targetRenderer.material = fallbackMaterial;
+                ConfigureOpaqueMaterial(targetRenderer.material);
+                continue;
+            }
+
+            for (int i = 0; i < materials.Length; i++)
+            {
+                if (materials[i] == null)
+                {
+                    materials[i] = fallbackMaterial;
+                }
+
+                ConfigureOpaqueMaterial(materials[i]);
+            }
+
+            targetRenderer.materials = materials;
+        }
+    }
+
     private static Material GetChestMaterial()
     {
         if (cachedChestMaterial == null)
@@ -1007,10 +1077,10 @@ public class DigSiteVisual : MonoBehaviour
     private static Material CreateChestMaterial()
     {
         Material material = CreateSimpleMaterial("Runtime Textured Treasure Chest", Color.white, 0.48f);
-        Texture2D baseTexture = LoadEditorTexture(ChestBasePath);
-        Texture2D normalTexture = LoadEditorTexture(ChestNormalPath);
-        Texture2D metalSmoothTexture = LoadEditorTexture(ChestMetalSmoothPath);
-        Texture2D occlusionTexture = LoadEditorTexture(ChestOcclusionPath);
+        Texture2D baseTexture = LoadRuntimeTexture(ChestBaseResourcePath, ChestBasePath);
+        Texture2D normalTexture = LoadRuntimeTexture(ChestNormalResourcePath, ChestNormalPath);
+        Texture2D metalSmoothTexture = LoadRuntimeTexture(ChestMetalSmoothResourcePath, ChestMetalSmoothPath);
+        Texture2D occlusionTexture = LoadRuntimeTexture(ChestOcclusionResourcePath, ChestOcclusionPath);
 
         if (baseTexture != null)
         {
@@ -1038,9 +1108,54 @@ public class DigSiteVisual : MonoBehaviour
             SetTexture(material, occlusionTexture, "_OcclusionMap");
         }
 
-        SetFloat(material, 0.22f, "_Metallic");
-        SetFloat(material, 0.42f, "_Smoothness", "_Glossiness");
+        SetMaterialColor(material, Color.white);
+        SetFloat(material, 0.7f, "_Metallic");
+        SetFloat(material, 0.5f, "_Smoothness", "_Glossiness");
+        SetFloat(material, 1f, "_OcclusionStrength");
+        material.EnableKeyword("_METALLICSPECGLOSSMAP");
+        ConfigureOpaqueMaterial(material);
         return material;
+    }
+
+    private static void ConfigureOpaqueMaterial(Material material)
+    {
+        if (material == null)
+        {
+            return;
+        }
+
+        Color visibleColor = GetMaterialColor(material, new Color(0.38f, 0.2f, 0.09f, 1f));
+        visibleColor.a = 1f;
+        SetMaterialColor(material, visibleColor);
+
+        if (material.HasProperty("_Surface"))
+        {
+            material.SetFloat("_Surface", 0f);
+        }
+
+        if (material.HasProperty("_SurfaceType"))
+        {
+            material.SetFloat("_SurfaceType", 0f);
+        }
+
+        if (material.HasProperty("_Mode"))
+        {
+            material.SetFloat("_Mode", 0f);
+        }
+
+        if (material.HasProperty("_AlphaClip"))
+        {
+            material.SetFloat("_AlphaClip", 0f);
+        }
+
+        material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+        material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
+        material.SetInt("_ZWrite", 1);
+        material.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        material.DisableKeyword("_ALPHABLEND_ON");
+        material.DisableKeyword("_ALPHATEST_ON");
+        material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        material.renderQueue = -1;
     }
 
     private static void DisableCollidersInChildren(GameObject target)

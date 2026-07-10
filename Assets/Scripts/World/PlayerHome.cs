@@ -5,17 +5,22 @@ using UnityEngine.SceneManagement;
 
 public class PlayerHome : MonoBehaviour
 {
-    private const string WatchFragmentName = "Watch Fragment";
-    private const string WorkingWatchName = "Working Pocket Watch";
-    private const int WorkingWatchValue = 95;
     private const string CraftingBoardResourcePath = "UI/CraftingBoard";
+    private const int StorageGridSize = 10;
+    private static readonly CraftingRecipe[] CraftingRecipes =
+    {
+        new CraftingRecipe("Working Pocket Watch", 120, 2, 1, "Watch Fragment", "Watch Case"),
+        new CraftingRecipe("Horseshoe", 45, 2, 1, "Horseshoe Fragment", "Metal Rod"),
+        new CraftingRecipe("Compass", 85, 1, 1, "Old Cracked Compass", "Metal Rod"),
+        new CraftingRecipe("Bracelet", 55, 2, 1, "Broken Chain", "Chain Piece", "Chain Link"),
+        new CraftingRecipe("Closed Portrait Locket", 110, 1, 1, "Cracked Glass Locket", "Metal Photo Frame")
+    };
 
     public Transform interactionPoint;
     public Transform promptAnchor;
     public float interactionDistance = 4.5f;
     public PlayerInventory playerInventory;
     public Transform player;
-    public DetectorBattery detectorBattery;
     public Renderer[] highlightRenderers;
     public Color highlightColor = new Color(0.2f, 1f, 0.35f, 1f);
 
@@ -24,14 +29,19 @@ public class PlayerHome : MonoBehaviour
     private readonly List<LineRenderer> outlineLines = new List<LineRenderer>();
     private bool isMenuOpen;
     private bool isCraftingOpen;
+    private bool isStorageOpen;
     private bool isHighlighted;
+    private HomeConfirmation pendingHomeConfirmation = HomeConfirmation.None;
     private string message = "";
     private float messageTimer;
     private Texture2D craftingBoardTexture;
     private Material outlineMaterial;
+    private Transform temporaryInteractionPoint;
+    private float temporaryInteractionDistance;
     private CraftingDragSource craftingDragSource = CraftingDragSource.None;
     private PlayerInventory.InventorySlot draggedCraftingItem;
     private PlayerInventory.InventorySlot draggedBackpackItem;
+    private Vector2 craftingRecipeScrollPosition;
     private int draggedCraftingSlotIndex = -1;
 
     private enum CraftingDragSource
@@ -40,6 +50,30 @@ public class PlayerHome : MonoBehaviour
         Backpack,
         CraftingSlot,
         Result
+    }
+
+    private enum HomeConfirmation
+    {
+        None,
+        EnterHouse
+    }
+
+    private class CraftingRecipe
+    {
+        public readonly string resultName;
+        public readonly int resultValue;
+        public readonly int resultWidth;
+        public readonly int resultHeight;
+        public readonly string[] ingredients;
+
+        public CraftingRecipe(string resultName, int resultValue, int resultWidth, int resultHeight, params string[] ingredients)
+        {
+            this.resultName = resultName;
+            this.resultValue = resultValue;
+            this.resultWidth = resultWidth;
+            this.resultHeight = resultHeight;
+            this.ingredients = ingredients;
+        }
     }
 
     public bool IsMenuOpen => isMenuOpen;
@@ -57,16 +91,30 @@ public class PlayerHome : MonoBehaviour
             messageTimer -= Time.deltaTime;
         }
 
-        if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame && IsPlayerInRange())
+        if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame && IsPlayerNearPrimaryInteraction())
         {
             if (!GameUIState.AnyMenuOpen || isMenuOpen)
             {
-                SetMenuOpen(!isMenuOpen);
+                if (isMenuOpen)
+                {
+                    SetMenuOpen(false);
+                }
+                else
+                {
+                    pendingHomeConfirmation = HomeConfirmation.EnterHouse;
+                    SetMenuOpen(true);
+                }
             }
         }
 
         if (isMenuOpen && Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
         {
+            if (pendingHomeConfirmation != HomeConfirmation.None)
+            {
+                pendingHomeConfirmation = HomeConfirmation.None;
+                return;
+            }
+
             SetMenuOpen(false);
         }
 
@@ -91,7 +139,26 @@ public class PlayerHome : MonoBehaviour
         }
 
         Vector3 targetPosition = interactionPoint != null ? interactionPoint.position : transform.position;
-        return Vector3.Distance(player.position, targetPosition) <= interactionDistance;
+
+        if (IsPlayerNear(targetPosition, interactionDistance))
+        {
+            return true;
+        }
+
+        return temporaryInteractionPoint != null && IsPlayerNear(temporaryInteractionPoint.position, temporaryInteractionDistance);
+    }
+
+    private bool IsPlayerNearPrimaryInteraction()
+    {
+        ResolveReferences();
+
+        if (player == null)
+        {
+            return false;
+        }
+
+        Vector3 targetPosition = interactionPoint != null ? interactionPoint.position : transform.position;
+        return IsPlayerNear(targetPosition, interactionDistance);
     }
 
     public void SetMenuOpen(bool open)
@@ -100,6 +167,10 @@ public class PlayerHome : MonoBehaviour
         {
             ReturnCraftingItemsToBackpack();
             isCraftingOpen = false;
+            isStorageOpen = false;
+            temporaryInteractionPoint = null;
+            temporaryInteractionDistance = 0f;
+            pendingHomeConfirmation = HomeConfirmation.None;
         }
 
         isMenuOpen = open;
@@ -110,20 +181,18 @@ public class PlayerHome : MonoBehaviour
     {
         if (playerInventory == null || playerInventory.items.Count == 0)
         {
-            ShowMessage("Backpack is empty.");
+            ShowMessage(GameLocalization.T("home.backpack_empty"));
             return;
         }
 
         int storedCount = playerInventory.items.Count;
         int storedValue = playerInventory.GetInventoryValue();
 
-        foreach (PlayerInventory.InventorySlot item in playerInventory.items)
+        for (int i = playerInventory.items.Count - 1; i >= 0; i--)
         {
-            storedItems.Add(CloneItem(item));
+            StoreItemFromBackpack(playerInventory.items[i], false);
         }
-
-        playerInventory.items.Clear();
-        ShowMessage("Stored " + storedCount + " item(s), value $" + storedValue + ".");
+        ShowMessage(GameLocalization.TFormat("home.stored_summary", storedCount, storedValue));
         LocalCoopManager.Instance?.ReportHomeStorageChanged(this);
     }
 
@@ -131,13 +200,13 @@ public class PlayerHome : MonoBehaviour
     {
         if (playerInventory == null)
         {
-            ShowMessage("No backpack found.");
+            ShowMessage(GameLocalization.T("home.no_backpack"));
             return;
         }
 
         if (storedItems.Count == 0)
         {
-            ShowMessage("Storage is empty.");
+            ShowMessage(GameLocalization.T("home.storage_empty"));
             return;
         }
 
@@ -160,15 +229,25 @@ public class PlayerHome : MonoBehaviour
 
         if (movedCount == 0)
         {
-            ShowMessage("Backpack is full.");
+            ShowMessage(GameLocalization.T("home.backpack_full"));
             return;
         }
 
-        ShowMessage("Took " + movedCount + " item(s), value $" + movedValue + ".");
+        ShowMessage(GameLocalization.TFormat("home.took_summary", movedCount, movedValue));
         LocalCoopManager.Instance?.ReportHomeStorageChanged(this);
     }
 
     public void Sleep()
+    {
+        SleepInternal();
+    }
+
+    public string SleepFromStation()
+    {
+        return SleepInternal();
+    }
+
+    private string SleepInternal()
     {
         ResolveReferences();
 
@@ -176,16 +255,14 @@ public class PlayerHome : MonoBehaviour
 
         if (DayNightCycle.Instance != null && !DayNightCycle.Instance.CanSleep)
         {
-            ShowMessage("You can sleep after 20:00.");
-            return;
+            return ShowMessageAndReturn(GameLocalization.T("home.sleep_after"));
         }
 
         if (coop != null && coop.IsRunning)
         {
             if (coop.RequestTeamSleep(out string teamSleepMessage))
             {
-                ShowMessage(teamSleepMessage);
-                return;
+                return ShowMessageAndReturn(teamSleepMessage);
             }
         }
 
@@ -193,16 +270,10 @@ public class PlayerHome : MonoBehaviour
         {
             DayNightCycle.Instance.SleepUntilMorning();
             coop?.ReportTeamStateChanged();
-            ShowMessage("You slept until morning. Treasures reset.");
-            return;
+            return ShowMessageAndReturn(GameLocalization.T("home.slept_reset"));
         }
 
-        if (detectorBattery != null)
-        {
-            detectorBattery.charge = detectorBattery.maxCharge;
-        }
-
-        ShowMessage("You slept. Detector battery refilled.");
+        return ShowMessageAndReturn(GameLocalization.T("home.slept"));
     }
 
     public void EnterHomeInterior()
@@ -211,7 +282,7 @@ public class PlayerHome : MonoBehaviour
 
         if (player == null)
         {
-            ShowMessage("No player found.");
+            ShowMessage(GameLocalization.T("home.no_player"));
             return;
         }
 
@@ -244,14 +315,61 @@ public class PlayerHome : MonoBehaviour
 
         foreach (PlayerInventory.InventorySlot item in importedItems)
         {
-            storedItems.Add(CloneItem(item));
+            PlayerInventory.InventorySlot storedItem = CloneItem(item);
+
+            if (CanPlaceStoredItemAt(storedItem.gridX, storedItem.gridY, storedItem.width, storedItem.height, null))
+            {
+                storedItems.Add(storedItem);
+                continue;
+            }
+
+            if (TryFindStorageSpace(storedItem.width, storedItem.height, out int gridX, out int gridY))
+            {
+                storedItem.gridX = gridX;
+                storedItem.gridY = gridY;
+                storedItems.Add(storedItem);
+            }
         }
     }
 
-    public void OpenCrafting()
+    public bool OpenCrafting()
     {
+        if (!IsCraftingUnlocked())
+        {
+            ShowMessage(GameLocalization.T("home.crafting_locked"));
+            return false;
+        }
+
         isCraftingOpen = true;
         ShowMessage("");
+        return true;
+    }
+
+    public string OpenCraftingFromStation(Transform stationPoint, float stationInteractionDistance)
+    {
+        if (!IsCraftingUnlocked())
+        {
+            return ShowMessageAndReturn(GameLocalization.T("home.crafting_locked"));
+        }
+
+        temporaryInteractionPoint = stationPoint;
+        temporaryInteractionDistance = Mathf.Max(0.5f, stationInteractionDistance);
+        isStorageOpen = false;
+        SetMenuOpen(true);
+        OpenCrafting();
+        return "";
+    }
+
+    public string OpenStorageFromStation(Transform stationPoint, float stationInteractionDistance)
+    {
+        temporaryInteractionPoint = stationPoint;
+        temporaryInteractionDistance = Mathf.Max(0.5f, stationInteractionDistance);
+        isCraftingOpen = false;
+        isStorageOpen = true;
+        pendingHomeConfirmation = HomeConfirmation.None;
+        SetMenuOpen(true);
+        ShowMessage("");
+        return "";
     }
 
     public void CloseCrafting()
@@ -259,6 +377,11 @@ public class PlayerHome : MonoBehaviour
         ClearCraftingDrag();
         ReturnCraftingItemsToBackpack();
         isCraftingOpen = false;
+    }
+
+    public void CloseStorage()
+    {
+        isStorageOpen = false;
     }
 
     public void CraftSelectedRecipe()
@@ -274,7 +397,7 @@ public class PlayerHome : MonoBehaviour
 
         foreach (PlayerHome home in homes)
         {
-            if (home == null || !home.IsPlayerInRange())
+            if (home == null || !home.IsPlayerNearPrimaryInteraction())
             {
                 continue;
             }
@@ -295,7 +418,18 @@ public class PlayerHome : MonoBehaviour
 
     public static bool AnyHomeInteractionInRange()
     {
-        return FindClosestHomeInRange() != null;
+        return FindClosestHomeInRange() != null || HomeInteractionStation.AnyStationInteractionInRange();
+    }
+
+    public bool IsCraftingUnlocked()
+    {
+        UpgradeShop shop = FindUpgradeShop();
+        return shop != null && shop.craftingUnlocked;
+    }
+
+    private bool IsPlayerNear(Vector3 targetPosition, float distance)
+    {
+        return player != null && Vector3.Distance(player.position, targetPosition) <= distance;
     }
 
     private void ResolveReferences()
@@ -310,10 +444,21 @@ public class PlayerHome : MonoBehaviour
             player = playerInventory.transform;
         }
 
-        if (detectorBattery == null)
+    }
+
+    private UpgradeShop FindUpgradeShop()
+    {
+        UpgradeShop[] shops = FindObjectsByType<UpgradeShop>(FindObjectsInactive.Include);
+
+        foreach (UpgradeShop shop in shops)
         {
-            detectorBattery = FindAnyObjectByType<DetectorBattery>();
+            if (shop != null && shop.CanUpgradeHere)
+            {
+                return shop;
+            }
         }
+
+        return shops.Length > 0 ? shops[0] : null;
     }
 
     private bool TryPlaceItemInCrafting(PlayerInventory.InventorySlot item)
@@ -327,7 +472,7 @@ public class PlayerHome : MonoBehaviour
 
         if (emptySlot < 0)
         {
-            ShowMessage("Crafting grid is full.");
+            ShowMessage(GameLocalization.T("home.crafting_grid_full"));
             return false;
         }
 
@@ -337,7 +482,7 @@ public class PlayerHome : MonoBehaviour
         }
 
         craftingSlots[emptySlot] = CloneItem(item);
-        ShowMessage("Placed " + item.itemName + ".");
+        ShowMessage(GameLocalization.TFormat("home.placed_item", item.itemName));
         return true;
     }
 
@@ -357,12 +502,12 @@ public class PlayerHome : MonoBehaviour
 
         if (!playerInventory.AddItem(item.itemName, item.value, item.width, item.height, item.icon))
         {
-            ShowMessage("Backpack is full.");
+            ShowMessage(GameLocalization.T("home.backpack_full"));
             return;
         }
 
         craftingSlots[slotIndex] = null;
-        ShowMessage("Returned " + item.itemName + ".");
+        ShowMessage(GameLocalization.TFormat("home.returned_item", item.itemName));
     }
 
     private void ReturnCraftingItemsToBackpack()
@@ -403,28 +548,76 @@ public class PlayerHome : MonoBehaviour
         return -1;
     }
 
-    private bool TryGetWatchRecipeRow(out int rowStart)
+    private CraftingRecipe GetMatchingCraftingRecipe()
     {
-        for (int row = 0; row < 3; row++)
+        foreach (CraftingRecipe recipe in CraftingRecipes)
         {
-            int start = row * 3;
-
-            if (IsWatchFragment(craftingSlots[start])
-                && IsWatchFragment(craftingSlots[start + 1])
-                && IsWatchFragment(craftingSlots[start + 2]))
+            if (CraftingGridMatches(recipe))
             {
-                rowStart = start;
-                return true;
+                return recipe;
             }
         }
 
-        rowStart = -1;
-        return false;
+        return null;
     }
 
-    private bool IsWatchFragment(PlayerInventory.InventorySlot item)
+    private bool CraftingGridMatches(CraftingRecipe recipe)
     {
-        return item != null && item.itemName == WatchFragmentName;
+        if (recipe == null || recipe.ingredients == null || recipe.ingredients.Length == 0)
+        {
+            return false;
+        }
+
+        Dictionary<string, int> requiredItems = new Dictionary<string, int>(System.StringComparer.OrdinalIgnoreCase);
+
+        foreach (string ingredient in recipe.ingredients)
+        {
+            if (string.IsNullOrWhiteSpace(ingredient))
+            {
+                continue;
+            }
+
+            if (!requiredItems.ContainsKey(ingredient))
+            {
+                requiredItems[ingredient] = 0;
+            }
+
+            requiredItems[ingredient]++;
+        }
+
+        int placedItemCount = 0;
+
+        foreach (PlayerInventory.InventorySlot item in craftingSlots)
+        {
+            if (item == null)
+            {
+                continue;
+            }
+
+            placedItemCount++;
+
+            if (!requiredItems.ContainsKey(item.itemName) || requiredItems[item.itemName] <= 0)
+            {
+                return false;
+            }
+
+            requiredItems[item.itemName]--;
+        }
+
+        if (placedItemCount != recipe.ingredients.Length)
+        {
+            return false;
+        }
+
+        foreach (int remainingCount in requiredItems.Values)
+        {
+            if (remainingCount != 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private Texture2D GetCraftingBoardTexture()
@@ -435,6 +628,112 @@ public class PlayerHome : MonoBehaviour
         }
 
         return craftingBoardTexture;
+    }
+
+    private bool StoreItemFromBackpack(PlayerInventory.InventorySlot item, bool showFeedback)
+    {
+        if (playerInventory == null || item == null)
+        {
+            return false;
+        }
+
+        if (!TryFindStorageSpace(item.width, item.height, out int gridX, out int gridY))
+        {
+            if (showFeedback)
+            {
+                ShowMessage(GameLocalization.T("home.storage_full"));
+            }
+
+            return false;
+        }
+
+        if (!playerInventory.RemoveItem(item))
+        {
+            return false;
+        }
+
+        PlayerInventory.InventorySlot storedItem = CloneItem(item);
+        storedItem.gridX = gridX;
+        storedItem.gridY = gridY;
+        storedItems.Add(storedItem);
+
+        if (showFeedback)
+        {
+            ShowMessage(GameLocalization.TFormat("home.stored_item", storedItem.itemName));
+        }
+
+        LocalCoopManager.Instance?.ReportHomeStorageChanged(this);
+        return true;
+    }
+
+    private bool TakeStoredItem(PlayerInventory.InventorySlot item)
+    {
+        if (playerInventory == null || item == null || !storedItems.Contains(item))
+        {
+            return false;
+        }
+
+        if (!playerInventory.AddItem(item.itemName, item.value, item.width, item.height, item.icon))
+        {
+            ShowMessage(GameLocalization.T("home.backpack_full"));
+            return false;
+        }
+
+        storedItems.Remove(item);
+        ShowMessage(GameLocalization.TFormat("home.took_item", item.itemName));
+        LocalCoopManager.Instance?.ReportHomeStorageChanged(this);
+        return true;
+    }
+
+    private bool TryFindStorageSpace(int width, int height, out int gridX, out int gridY)
+    {
+        width = Mathf.Clamp(width, 1, StorageGridSize);
+        height = Mathf.Clamp(height, 1, StorageGridSize);
+
+        for (int y = 0; y <= StorageGridSize - height; y++)
+        {
+            for (int x = 0; x <= StorageGridSize - width; x++)
+            {
+                if (CanPlaceStoredItemAt(x, y, width, height, null))
+                {
+                    gridX = x;
+                    gridY = y;
+                    return true;
+                }
+            }
+        }
+
+        gridX = 0;
+        gridY = 0;
+        return false;
+    }
+
+    private bool CanPlaceStoredItemAt(int gridX, int gridY, int width, int height, PlayerInventory.InventorySlot ignoredItem)
+    {
+        if (gridX < 0 || gridY < 0 || width <= 0 || height <= 0 || gridX + width > StorageGridSize || gridY + height > StorageGridSize)
+        {
+            return false;
+        }
+
+        foreach (PlayerInventory.InventorySlot item in storedItems)
+        {
+            if (item == null || item == ignoredItem)
+            {
+                continue;
+            }
+
+            bool overlaps = gridX < item.gridX + item.width
+                && gridX + width > item.gridX
+                && gridY < item.gridY + item.height
+                && gridY + height > item.gridY;
+
+            if (overlaps)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private int GetStoredValue()
@@ -469,6 +768,12 @@ public class PlayerHome : MonoBehaviour
         messageTimer = 2.8f;
     }
 
+    private string ShowMessageAndReturn(string value)
+    {
+        ShowMessage(value);
+        return value;
+    }
+
     private void OnGUI()
     {
         if (isMenuOpen)
@@ -477,15 +782,15 @@ public class PlayerHome : MonoBehaviour
             return;
         }
 
-        if (IsPlayerInRange() && !GameUIState.AnyMenuOpen)
+        if (IsPlayerNearPrimaryInteraction() && !GameUIState.AnyMenuOpen)
         {
-            GameGui.DrawToast(new Rect(Screen.width * 0.5f - 190f, Screen.height - 178f, 380f, 40f), "E - Use home");
+            GameGui.DrawToast(new Rect(Screen.width * 0.5f - 190f, Screen.height - 178f, 380f, 40f), GameLocalization.T("hud.hint_use_home"));
         }
     }
 
     private void UpdateHighlight()
     {
-        SetHighlighted(IsPlayerInRange() && !GameUIState.AnyMenuOpen);
+        SetHighlighted(IsPlayerNearPrimaryInteraction() && !GameUIState.AnyMenuOpen);
     }
 
     private void SetHighlighted(bool highlighted)
@@ -614,64 +919,176 @@ public class PlayerHome : MonoBehaviour
             return;
         }
 
-        Rect panel = new Rect(Screen.width * 0.5f - 220f, Screen.height * 0.5f - 186f, 440f, 372f);
-        GameGui.DrawPanel(panel, "Home");
-
-        int backpackCount = playerInventory != null ? playerInventory.items.Count : 0;
-        int backpackValue = playerInventory != null ? playerInventory.GetInventoryValue() : 0;
-        GUI.Label(new Rect(panel.x + 18f, panel.y + 46f, panel.width - 36f, 24f), "Backpack: " + backpackCount + " item(s), $" + backpackValue, GameGui.LabelStyle);
-        GUI.Label(new Rect(panel.x + 18f, panel.y + 72f, panel.width - 36f, 24f), "Storage: " + StoredItemCount + " item(s), $" + StoredValue, GameGui.LabelStyle);
-
-        if (GameGui.Button(new Rect(panel.x + 18f, panel.y + 112f, panel.width - 36f, 38f), "Store backpack"))
+        if (isStorageOpen)
         {
-            StoreBackpack();
+            DrawStorageMenu();
+            return;
         }
 
-        if (GameGui.Button(new Rect(panel.x + 18f, panel.y + 158f, panel.width - 36f, 38f), "Take stored items"))
+        if (pendingHomeConfirmation == HomeConfirmation.None)
         {
-            TakeStoredItems();
+            pendingHomeConfirmation = HomeConfirmation.EnterHouse;
         }
 
-        LocalCoopManager coop = LocalCoopManager.Instance;
-        bool teamSleepActive = coop != null && coop.IsRunning;
-        string sleepButtonText = teamSleepActive && coop.IsLocalPlayerSleepReady ? "Waiting for team..." : "Sleep";
+        DrawHomeConfirmationDialog();
+    }
 
-        if (GameGui.Button(new Rect(panel.x + 18f, panel.y + 204f, panel.width - 36f, 38f), sleepButtonText))
+    private void DrawHomeConfirmationDialog()
+    {
+        if (pendingHomeConfirmation == HomeConfirmation.None)
         {
-            Sleep();
+            return;
         }
 
-        if (GameGui.Button(new Rect(panel.x + 18f, panel.y + 250f, panel.width - 36f, 38f), "Crafting"))
-        {
-            OpenCrafting();
-        }
+        Rect overlay = new Rect(0f, 0f, Screen.width, Screen.height);
+        GameGui.DrawRect(overlay, new Color(0f, 0f, 0f, 0.48f));
 
-        if (GameGui.Button(new Rect(panel.x + 18f, panel.y + 296f, panel.width - 36f, 38f), "Enter house"))
+        Rect panel = new Rect(Screen.width * 0.5f - 220f, Screen.height * 0.5f - 132f, 440f, 264f);
+        GameGui.DrawPanel(panel, GameLocalization.T("home.confirm_title"));
+        string body = GameLocalization.T("home.confirm_body");
+        GUI.Label(new Rect(panel.x + 28f, panel.y + 54f, panel.width - 56f, 58f), body, GameGui.LabelStyle);
+
+        Rect acceptRect = new Rect(panel.x + 102f, panel.y + 138f, 72f, 72f);
+        Rect rejectRect = new Rect(panel.xMax - 174f, panel.y + 138f, 72f, 72f);
+
+        if (GUI.Button(acceptRect, GUIContent.none, GUIStyle.none))
         {
+            pendingHomeConfirmation = HomeConfirmation.None;
             EnterHomeInterior();
         }
 
-        string footerText = messageTimer > 0f ? message : "ESC - Close";
-
-        if (teamSleepActive && coop.HasTeamSleepVote && !string.IsNullOrEmpty(coop.TeamSleepStatusText))
+        if (GUI.Button(rejectRect, GUIContent.none, GUIStyle.none))
         {
-            footerText = coop.TeamSleepStatusText;
+            SetMenuOpen(false);
         }
 
-        GUI.Label(new Rect(panel.x + 18f, panel.y + 340f, panel.width - 36f, 22f), footerText, GameGui.HintStyle);
+        GameGui.DrawIcon(acceptRect, "confirm", Color.white);
+        GameGui.DrawIcon(rejectRect, "reject", Color.white);
+        GUI.Label(new Rect(acceptRect.x - 16f, acceptRect.yMax + 4f, acceptRect.width + 32f, 20f), GameLocalization.T("home.confirm_accept"), GameGui.HintStyle);
+        GUI.Label(new Rect(rejectRect.x - 16f, rejectRect.yMax + 4f, rejectRect.width + 32f, 20f), GameLocalization.T("home.confirm_cancel"), GameGui.HintStyle);
+    }
+
+    private void DrawStorageMenu()
+    {
+        float availableWidth = Mathf.Max(760f, Screen.width - 40f);
+        float availableHeight = Mathf.Max(520f, Screen.height - 70f);
+        float gap = 22f;
+        float backpackWidth = Mathf.Clamp(availableWidth * 0.38f, 360f, 560f);
+        float storageSize = Mathf.Min(availableHeight - 92f, availableWidth - backpackWidth - gap - 42f);
+        storageSize = Mathf.Clamp(storageSize, 420f, 720f);
+        float totalWidth = backpackWidth + gap + storageSize;
+        float startX = Screen.width * 0.5f - totalWidth * 0.5f;
+        float startY = Screen.height * 0.5f - Mathf.Max(backpackWidth / PlayerInventory.BoardAspect, storageSize) * 0.5f - 12f;
+
+        Rect backpackRect = PlayerInventory.GetInventoryBoardRect(
+            startX + backpackWidth * 0.5f,
+            startY + storageSize * 0.5f,
+            backpackWidth,
+            Mathf.Min(storageSize, backpackWidth / PlayerInventory.BoardAspect));
+        Rect storageRect = new Rect(startX + backpackWidth + gap, startY, storageSize, storageSize);
+        Rect titleRect = new Rect(storageRect.x, storageRect.y - 40f, storageRect.width, 28f);
+        Rect footerRect = new Rect(startX, startY + storageSize + 12f, totalWidth, 28f);
+
+        GUI.Label(new Rect(backpackRect.x, backpackRect.y - 40f, backpackRect.width, 28f), GameLocalization.T("home.backpack_title"), GameGui.TitleStyle);
+        GUI.Label(titleRect, GameLocalization.T("home.storage_title"), GameGui.TitleStyle);
+
+        if (playerInventory != null)
+        {
+            playerInventory.DrawInventoryBoard(backpackRect, false, null);
+            HandleStorageBackpackClick(backpackRect);
+        }
+
+        DrawStorageGrid(storageRect);
+        GUI.Label(footerRect, messageTimer > 0f ? message : GameLocalization.T("home.storage_help"), GameGui.HintStyle);
+    }
+
+    private void DrawStorageGrid(Rect gridRect)
+    {
+        GameGui.DrawPanel(gridRect, "");
+        float gap = 2f;
+        float cellSize = (gridRect.width - gap * (StorageGridSize + 1)) / StorageGridSize;
+
+        for (int y = 0; y < StorageGridSize; y++)
+        {
+            for (int x = 0; x < StorageGridSize; x++)
+            {
+                Rect cellRect = new Rect(
+                    gridRect.x + gap + x * (cellSize + gap),
+                    gridRect.y + gap + y * (cellSize + gap),
+                    cellSize,
+                    cellSize);
+                GameGui.DrawRect(cellRect, new Color(0.04f, 0.035f, 0.025f, 0.58f));
+            }
+        }
+
+        PlayerInventory.InventorySlot clickedItem = null;
+
+        foreach (PlayerInventory.InventorySlot item in storedItems)
+        {
+            Rect itemRect = GetStorageItemRect(gridRect, item, cellSize, gap);
+
+            if (GUI.Button(itemRect, "", GUIStyle.none))
+            {
+                clickedItem = item;
+            }
+
+            PlayerInventory.DrawInventoryItem(itemRect, item);
+        }
+
+        if (clickedItem != null)
+        {
+            TakeStoredItem(clickedItem);
+        }
+    }
+
+    private Rect GetStorageItemRect(Rect gridRect, PlayerInventory.InventorySlot item, float cellSize, float gap)
+    {
+        float x = gridRect.x + gap + item.gridX * (cellSize + gap);
+        float y = gridRect.y + gap + item.gridY * (cellSize + gap);
+        float width = item.width * cellSize + Mathf.Max(0, item.width - 1) * gap;
+        float height = item.height * cellSize + Mathf.Max(0, item.height - 1) * gap;
+        return new Rect(x, y, width, height);
+    }
+
+    private void HandleStorageBackpackClick(Rect backpackRect)
+    {
+        Event currentEvent = Event.current;
+
+        if (currentEvent == null || currentEvent.type != EventType.MouseDown || currentEvent.button != 0 || !backpackRect.Contains(currentEvent.mousePosition))
+        {
+            return;
+        }
+
+        PlayerInventory.InventorySlot item = GetBackpackItemAt(backpackRect, currentEvent.mousePosition);
+
+        if (item != null && StoreItemFromBackpack(item, true))
+        {
+            currentEvent.Use();
+        }
     }
 
     private void DrawCraftingMenu()
     {
         float availableWidth = Mathf.Max(720f, Screen.width - 40f);
         float gap = 18f;
-        float backpackWidth = Mathf.Clamp(Screen.width * 0.34f, 420f, 620f);
-        float boardWidth = Mathf.Clamp(availableWidth - backpackWidth - gap, 620f, 980f);
+        float recipeWidth = Mathf.Clamp(Screen.width * 0.22f, 310f, 380f);
+        bool useRecipeSidePanel = availableWidth >= 1180f;
+        float backpackWidth = useRecipeSidePanel
+            ? Mathf.Clamp(Screen.width * 0.25f, 340f, 520f)
+            : Mathf.Clamp(Screen.width * 0.34f, 420f, 620f);
+        float boardWidth = Mathf.Clamp(availableWidth - backpackWidth - gap - (useRecipeSidePanel ? recipeWidth + gap : 0f), 620f, 980f);
 
-        if (boardWidth + backpackWidth + gap > availableWidth)
+        if (useRecipeSidePanel && boardWidth < 560f)
         {
-            backpackWidth = Mathf.Clamp(availableWidth * 0.34f, 340f, 520f);
-            boardWidth = Mathf.Max(520f, availableWidth - backpackWidth - gap);
+            useRecipeSidePanel = false;
+            backpackWidth = Mathf.Clamp(Screen.width * 0.34f, 420f, 620f);
+            boardWidth = Mathf.Clamp(availableWidth - backpackWidth - gap, 620f, 980f);
+        }
+
+        if (boardWidth + backpackWidth + gap + (useRecipeSidePanel ? recipeWidth + gap : 0f) > availableWidth)
+        {
+            backpackWidth = Mathf.Clamp(availableWidth * (useRecipeSidePanel ? 0.27f : 0.34f), 320f, 520f);
+            boardWidth = Mathf.Max(520f, availableWidth - backpackWidth - gap - (useRecipeSidePanel ? recipeWidth + gap : 0f));
         }
 
         float boardHeight = boardWidth / PlayerInventory.BoardAspect;
@@ -682,34 +1099,171 @@ public class PlayerHome : MonoBehaviour
         {
             boardHeight = maxBoardHeight;
             boardWidth = boardHeight * PlayerInventory.BoardAspect;
-            backpackWidth = Mathf.Min(backpackWidth, Mathf.Max(320f, availableWidth - boardWidth - gap));
+            backpackWidth = Mathf.Min(backpackWidth, Mathf.Max(320f, availableWidth - boardWidth - gap - (useRecipeSidePanel ? recipeWidth + gap : 0f)));
             backpackHeight = backpackWidth / PlayerInventory.BoardAspect;
         }
 
-        float totalWidth = boardWidth + backpackWidth + gap;
+        float totalWidth = boardWidth + backpackWidth + gap + (useRecipeSidePanel ? recipeWidth + gap : 0f);
         Rect boardRect = new Rect(Screen.width * 0.5f - totalWidth * 0.5f, Screen.height * 0.5f - boardHeight * 0.5f - 8f, boardWidth, boardHeight);
         Texture2D boardTexture = GetCraftingBoardTexture();
         Rect contentRect = boardRect;
         Rect backpackRect = new Rect(contentRect.x + contentRect.width + gap, contentRect.y + contentRect.height * 0.5f - backpackHeight * 0.5f, backpackWidth, backpackHeight);
+        Rect recipeRect = useRecipeSidePanel
+            ? new Rect(backpackRect.xMax + gap, contentRect.y, recipeWidth, contentRect.height)
+            : Rect.zero;
 
         if (boardTexture != null)
         {
             contentRect = PlayerInventory.GetFittedTextureRect(boardRect, boardTexture);
             GUI.DrawTexture(contentRect, boardTexture, ScaleMode.StretchToFill, true);
             backpackRect = new Rect(contentRect.x + contentRect.width + gap, contentRect.y + contentRect.height * 0.5f - backpackHeight * 0.5f, backpackWidth, backpackHeight);
+            recipeRect = useRecipeSidePanel
+                ? new Rect(backpackRect.xMax + gap, contentRect.y, recipeWidth, contentRect.height)
+                : Rect.zero;
         }
         else
         {
-            GameGui.DrawPanel(boardRect, "Crafting");
+            GameGui.DrawPanel(boardRect, GameLocalization.T("home.crafting_title"));
+        }
+
+        if (!useRecipeSidePanel)
+        {
+            float remainingHeight = Screen.height - backpackRect.yMax - 24f;
+            float recipeHeight = Mathf.Clamp(remainingHeight, 190f, 280f);
+            recipeRect = new Rect(backpackRect.x, backpackRect.yMax + 12f, backpackRect.width, recipeHeight);
+
+            if (recipeRect.yMax > Screen.height - 12f)
+            {
+                recipeRect.y = Mathf.Max(12f, contentRect.y + contentRect.height - recipeRect.height);
+            }
         }
 
         DrawCraftingGrid(contentRect);
         DrawCraftingResult(contentRect);
         DrawCraftingBackpack(backpackRect);
+        DrawCraftingRecipeList(recipeRect);
 
-        GUI.Label(new Rect(contentRect.x + 42f, contentRect.y + contentRect.height - 48f, contentRect.width - 250f, 28f), messageTimer > 0f ? message : "ESC - Close", GameGui.HintStyle);
+        GUI.Label(new Rect(contentRect.x + 42f, contentRect.y + contentRect.height - 48f, contentRect.width - 250f, 28f), messageTimer > 0f ? message : GameLocalization.T("home.close_hint"), GameGui.HintStyle);
         HandleCraftingDragRelease(contentRect, backpackRect);
         DrawCraftingDragGhost();
+    }
+
+    private void DrawCraftingRecipeList(Rect recipeRect)
+    {
+        if (recipeRect.width <= 0f || recipeRect.height <= 0f)
+        {
+            return;
+        }
+
+        GameGui.DrawPanel(recipeRect, GameLocalization.T("home.recipes_title"));
+
+        Rect listRect = new Rect(recipeRect.x + 12f, recipeRect.y + 42f, recipeRect.width - 24f, recipeRect.height - 54f);
+        float rowHeight = 78f;
+        Rect viewRect = new Rect(0f, 0f, Mathf.Max(1f, listRect.width - 18f), CraftingRecipes.Length * rowHeight);
+        craftingRecipeScrollPosition = GUI.BeginScrollView(listRect, craftingRecipeScrollPosition, viewRect, false, true);
+
+        for (int i = 0; i < CraftingRecipes.Length; i++)
+        {
+            DrawCraftingRecipeRow(new Rect(0f, i * rowHeight, viewRect.width, rowHeight - 8f), CraftingRecipes[i], i);
+        }
+
+        GUI.EndScrollView();
+    }
+
+    private void DrawCraftingRecipeRow(Rect rowRect, CraftingRecipe recipe, int index)
+    {
+        if (recipe == null)
+        {
+            return;
+        }
+
+        bool hasIngredients = HasIngredientsForRecipe(recipe, out string missingText);
+        Color rowColor = index % 2 == 0
+            ? new Color(0.06f, 0.055f, 0.04f, 0.74f)
+            : new Color(0.10f, 0.085f, 0.055f, 0.66f);
+
+        GameGui.DrawRect(rowRect, rowColor);
+        GameGui.DrawRect(new Rect(rowRect.x, rowRect.y, 3f, rowRect.height), hasIngredients ? GameGui.GoodColor : GameGui.PanelBorderColor);
+
+        Rect iconRect = new Rect(rowRect.x + 8f, rowRect.y + 9f, 52f, 52f);
+        PlayerInventory.DrawInventoryItem(iconRect, CreateCraftingResultItem(recipe));
+
+        float textX = iconRect.xMax + 9f;
+        float textWidth = Mathf.Max(1f, rowRect.width - textX - 8f);
+        GUI.Label(new Rect(textX, rowRect.y + 7f, textWidth, 20f), recipe.resultName + "  $" + recipe.resultValue, GameGui.LabelStyle);
+        GUI.Label(new Rect(textX, rowRect.y + 29f, textWidth, 20f), string.Join(" + ", recipe.ingredients), GameGui.SmallLabelStyle);
+
+        Color oldColor = GUI.color;
+        GUI.color = hasIngredients ? GameGui.GoodColor : GameGui.MutedTextColor;
+        GUI.Label(new Rect(textX, rowRect.y + 51f, textWidth, 18f), hasIngredients ? GameLocalization.T("home.ready") : GameLocalization.TFormat("home.missing", missingText), GameGui.SmallLabelStyle);
+        GUI.color = oldColor;
+    }
+
+    private bool HasIngredientsForRecipe(CraftingRecipe recipe, out string missingText)
+    {
+        Dictionary<string, int> requiredItems = new Dictionary<string, int>(System.StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, int> availableItems = new Dictionary<string, int>(System.StringComparer.OrdinalIgnoreCase);
+
+        foreach (string ingredient in recipe.ingredients)
+        {
+            if (string.IsNullOrWhiteSpace(ingredient))
+            {
+                continue;
+            }
+
+            if (!requiredItems.ContainsKey(ingredient))
+            {
+                requiredItems[ingredient] = 0;
+            }
+
+            requiredItems[ingredient]++;
+        }
+
+        if (playerInventory != null)
+        {
+            foreach (PlayerInventory.InventorySlot item in playerInventory.items)
+            {
+                AddAvailableCraftingItem(availableItems, item);
+            }
+        }
+
+        foreach (PlayerInventory.InventorySlot item in craftingSlots)
+        {
+            AddAvailableCraftingItem(availableItems, item);
+        }
+
+        List<string> missingItems = new List<string>();
+
+        foreach (KeyValuePair<string, int> requiredItem in requiredItems)
+        {
+            availableItems.TryGetValue(requiredItem.Key, out int availableCount);
+            int missingCount = requiredItem.Value - availableCount;
+
+            if (missingCount <= 0)
+            {
+                continue;
+            }
+
+            missingItems.Add(requiredItem.Key + (missingCount > 1 ? " x" + missingCount : ""));
+        }
+
+        missingText = missingItems.Count > 0 ? string.Join(", ", missingItems.ToArray()) : "";
+        return missingItems.Count == 0;
+    }
+
+    private static void AddAvailableCraftingItem(Dictionary<string, int> availableItems, PlayerInventory.InventorySlot item)
+    {
+        if (item == null || string.IsNullOrWhiteSpace(item.itemName))
+        {
+            return;
+        }
+
+        if (!availableItems.ContainsKey(item.itemName))
+        {
+            availableItems[item.itemName] = 0;
+        }
+
+        availableItems[item.itemName]++;
     }
 
     private void DrawCraftingGrid(Rect boardRect)
@@ -734,10 +1288,11 @@ public class PlayerHome : MonoBehaviour
     private void DrawCraftingResult(Rect boardRect)
     {
         Rect resultRect = GetCraftingResultRect(boardRect);
+        CraftingRecipe recipe = GetMatchingCraftingRecipe();
 
-        if (TryGetWatchRecipeRow(out _))
+        if (recipe != null)
         {
-            PlayerInventory.InventorySlot resultItem = CreateWorkingWatchItem();
+            PlayerInventory.InventorySlot resultItem = CreateCraftingResultItem(recipe);
             PlayerInventory.DrawInventoryItem(resultRect, resultItem);
             HandleCraftingResultDragStart(resultRect, resultItem);
         }
@@ -764,14 +1319,15 @@ public class PlayerHome : MonoBehaviour
         currentEvent.Use();
     }
 
-    private PlayerInventory.InventorySlot CreateWorkingWatchItem()
+    private PlayerInventory.InventorySlot CreateCraftingResultItem(CraftingRecipe recipe)
     {
         return new PlayerInventory.InventorySlot
             {
-                itemName = WorkingWatchName,
-                value = WorkingWatchValue,
-                width = 2,
-                height = 1
+                itemName = recipe.resultName,
+                value = recipe.resultValue,
+                icon = PlayerInventory.ResolveItemIcon(recipe.resultName),
+                width = recipe.resultWidth,
+                height = recipe.resultHeight
             };
     }
 
@@ -874,7 +1430,7 @@ public class PlayerHome : MonoBehaviour
 
         if (craftingSlots[targetSlot] != null)
         {
-            ShowMessage("Crafting slot is occupied.");
+            ShowMessage(GameLocalization.T("home.slot_occupied"));
             return;
         }
 
@@ -884,34 +1440,38 @@ public class PlayerHome : MonoBehaviour
         }
 
         craftingSlots[targetSlot] = CloneItem(draggedBackpackItem);
-        ShowMessage("Placed " + draggedBackpackItem.itemName + ".");
+        ShowMessage(GameLocalization.TFormat("home.placed_item", draggedBackpackItem.itemName));
     }
 
     private bool TryClaimCraftingResult()
     {
         if (playerInventory == null)
         {
-            ShowMessage("No backpack found.");
+            ShowMessage(GameLocalization.T("home.no_backpack"));
             return false;
         }
 
-        if (!TryGetWatchRecipeRow(out int rowStart))
+        CraftingRecipe recipe = GetMatchingCraftingRecipe();
+
+        if (recipe == null)
         {
             return false;
         }
 
-        if (!playerInventory.AddItem(WorkingWatchName, WorkingWatchValue, 2, 1))
+        PlayerInventory.InventorySlot resultItem = CreateCraftingResultItem(recipe);
+
+        if (!playerInventory.AddItem(resultItem.itemName, resultItem.value, resultItem.width, resultItem.height, resultItem.icon))
         {
-            ShowMessage("Need 2x1 space in backpack.");
+            ShowMessage(GameLocalization.TFormat("home.need_space", resultItem.width, resultItem.height));
             return false;
         }
 
-        for (int i = rowStart; i < rowStart + 3; i++)
+        for (int i = 0; i < craftingSlots.Length; i++)
         {
             craftingSlots[i] = null;
         }
 
-        ShowMessage("Crafted " + WorkingWatchName + "!");
+        ShowMessage(GameLocalization.TFormat("home.crafted_item", resultItem.itemName));
         return true;
     }
 

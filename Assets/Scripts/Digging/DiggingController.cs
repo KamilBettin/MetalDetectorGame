@@ -29,6 +29,10 @@ public class DiggingController : MonoBehaviour
     private int lastFoundValue;
     private int lastDigCurrentHits;
     private int lastDigRequiredHits;
+    private float lastDigProgressStart01;
+    private float lastDigProgressEnd01;
+    private float digProgressStartTime;
+    private float digProgressEndTime;
     private float nextDigAllowedTime;
     private bool chestSearchInProgress;
 
@@ -40,7 +44,24 @@ public class DiggingController : MonoBehaviour
     public int LastFoundValue => lastFoundValue;
     public int LastDigCurrentHits => lastDigCurrentHits;
     public int LastDigRequiredHits => lastDigRequiredHits;
-    public float LastDigProgress01 => lastDigRequiredHits > 0 ? Mathf.Clamp01(lastDigCurrentHits / (float)lastDigRequiredHits) : 0f;
+    public float LastDigProgress01
+    {
+        get
+        {
+            if (lastDigRequiredHits <= 0)
+            {
+                return 0f;
+            }
+
+            if (digProgressEndTime > digProgressStartTime && Time.time < digProgressEndTime)
+            {
+                float progress = Mathf.InverseLerp(digProgressStartTime, digProgressEndTime, Time.time);
+                return Mathf.Lerp(lastDigProgressStart01, lastDigProgressEnd01, Mathf.SmoothStep(0f, 1f, progress));
+            }
+
+            return lastDigProgressEnd01;
+        }
+    }
 
     public bool HasDigTargetInRange => FindClosestTreasureInRange() != null;
     public bool HasSearchableChestInRange => FindClosestSearchableChestInRange() != null;
@@ -66,7 +87,7 @@ public class DiggingController : MonoBehaviour
                 return;
             }
 
-            if (GameUIState.AnyMenuOpen || (upgradeShop != null && upgradeShop.IsPlayerNearShop()) || PlayerHome.AnyHomeInteractionInRange() || NpcQuestGiver.AnyQuestGiverInteractionInRange())
+            if (GameUIState.AnyBlockingUIOpen || (upgradeShop != null && upgradeShop.IsPlayerNearShop()) || PlayerHome.AnyHomeInteractionInRange() || NpcQuestGiver.AnyQuestGiverInteractionInRange())
             {
                 return;
             }
@@ -80,6 +101,11 @@ public class DiggingController : MonoBehaviour
         if (messageTimer > 0f)
         {
             messageTimer -= Time.deltaTime;
+
+            if (messageTimer <= 0f && !chestSearchInProgress)
+            {
+                ClearDigProgress();
+            }
         }
     }
 
@@ -110,24 +136,27 @@ public class DiggingController : MonoBehaviour
             return;
         }
 
-        bool digComplete = treasure.DigOnce();
+        int previousDigHits = treasure.currentDigHits;
+        bool digComplete = treasure.DigOnce(GetDigHitPower());
         DigSiteVisual digSite = UpdateDigSite(treasure);
 
         if (!digComplete)
         {
-            StartDigCooldown(PlayDigVisual(treasure, false));
+            float digDuration = PlayDigVisual(treasure, false);
+            StartDigCooldown(digDuration);
             lastFoundMessage = "Digging: " + treasure.currentDigHits + "/" + treasure.requiredDigHits;
             lastFoundIcon = null;
             lastFoundWasTreasure = false;
             lastFoundItemName = "";
             lastFoundValue = 0;
-            lastDigCurrentHits = treasure.currentDigHits;
-            lastDigRequiredHits = treasure.requiredDigHits;
+            SetDigProgress(previousDigHits, treasure.currentDigHits, treasure.requiredDigHits, digDuration);
             messageTimer = 1.5f;
             return;
         }
 
-        StartDigCooldown(PlayDigVisual(treasure, true));
+        float finalDigDuration = PlayDigVisual(treasure, true);
+        StartDigCooldown(finalDigDuration);
+        SetDigProgress(previousDigHits, treasure.currentDigHits, treasure.requiredDigHits, finalDigDuration);
         PrepareSearchableChest(treasure, digSite);
     }
 
@@ -261,7 +290,8 @@ public class DiggingController : MonoBehaviour
         lastFoundWasTreasure = false;
         lastFoundItemName = "";
         lastFoundValue = 0;
-        ClearDigProgress();
+        lastDigCurrentHits = Mathf.Max(1, treasure.requiredDigHits);
+        lastDigRequiredHits = Mathf.Max(1, treasure.requiredDigHits);
         messageTimer = 2.4f;
     }
 
@@ -269,6 +299,25 @@ public class DiggingController : MonoBehaviour
     {
         lastDigCurrentHits = 0;
         lastDigRequiredHits = 0;
+        lastDigProgressStart01 = 0f;
+        lastDigProgressEnd01 = 0f;
+        digProgressStartTime = 0f;
+        digProgressEndTime = 0f;
+    }
+
+    private void SetDigProgress(int previousHits, int currentHits, int requiredHits, float duration)
+    {
+        lastDigRequiredHits = Mathf.Max(1, requiredHits);
+        lastDigCurrentHits = Mathf.Clamp(currentHits, 0, lastDigRequiredHits);
+        lastDigProgressStart01 = Mathf.Clamp01(previousHits / (float)lastDigRequiredHits);
+        lastDigProgressEnd01 = Mathf.Clamp01(lastDigCurrentHits / (float)lastDigRequiredHits);
+        digProgressStartTime = Time.time;
+        digProgressEndTime = Time.time + Mathf.Max(0.05f, duration);
+    }
+
+    private int GetDigHitPower()
+    {
+        return upgradeShop != null && upgradeShop.shovelUpgraded ? 2 : 1;
     }
 
     public DetectableTreasure FindClosestTreasureInRange()
@@ -515,13 +564,13 @@ public class DiggingController : MonoBehaviour
             return;
         }
 
-        if (!GameUIState.AnyMenuOpen)
+        if (!GameUIState.AnyBlockingUIOpen)
         {
             string prompt = HasSearchableChestInRange
                 ? "E - Search"
                 : HasDigTargetInRange
                     ? "E - Dig"
-                    : "Hold LMB to scan sand.";
+                    : "Hold LMB to scan the ground.";
             GameGui.DrawToast(new Rect(Screen.width * 0.5f - 190f, Screen.height - 74f, 380f, 42f), prompt);
         }
 

@@ -128,6 +128,7 @@ public class DetectorVisualBuilder : MonoBehaviour
         nextScreenRegistrationTime = Time.unscaledTime + ScreenRegistrationRefreshInterval;
 
         screenSignalDisplay.RegisterModelRoot(transform);
+        RegisterDetectorTierVisualScreens();
 
         if (modelInstance != null)
         {
@@ -142,6 +143,19 @@ public class DetectorVisualBuilder : MonoBehaviour
         if (shadowVisual != null)
         {
             screenSignalDisplay.RegisterModelRoot(shadowVisual);
+        }
+    }
+
+    private void RegisterDetectorTierVisualScreens()
+    {
+        if (metalDetector == null || metalDetector.detectorTierVisuals == null)
+        {
+            return;
+        }
+
+        foreach (Transform tierVisual in metalDetector.detectorTierVisuals)
+        {
+            screenSignalDisplay.RegisterModelRoot(tierVisual);
         }
     }
 

@@ -7,6 +7,7 @@ public class PlayerInventory : MonoBehaviour
 {
     private const int MinimumGridSize = 3;
     private const int MaximumArtGridSize = 5;
+    private const int TrailerStartingMoney = 1000;
     public const float BoardAspect = 4f / 3f;
     private static readonly Dictionary<int, Texture2D> BoardTextures = new Dictionary<int, Texture2D>();
     private static readonly Dictionary<string, Sprite> GeneratedItemIcons = new Dictionary<string, Sprite>();
@@ -35,6 +36,7 @@ public class PlayerInventory : MonoBehaviour
 
     private void Awake()
     {
+        money = Mathf.Max(money, TrailerStartingMoney);
         ClampGridSizeToAvailableArt();
     }
 
@@ -241,16 +243,9 @@ public class PlayerInventory : MonoBehaviour
 
     private void DrawCompactStatus()
     {
-        Rect rect = new Rect(Screen.width - 230f, 20f, 210f, 76f);
+        Rect rect = new Rect(Screen.width - 190f, 20f, 170f, 48f);
         GameGui.DrawPanel(rect, "");
-        GUI.Label(new Rect(rect.x + 12f, rect.y + 8f, rect.width - 24f, 22f), "$" + money + " cash", GameGui.LabelStyle);
-        GUI.Label(new Rect(rect.x + 12f, rect.y + 31f, rect.width - 24f, 18f), "Cargo $" + GetInventoryValue(), GameGui.SmallLabelStyle);
-        GameGui.DrawProgressBar(
-            new Rect(rect.x + 12f, rect.y + 54f, rect.width - 24f, 12f),
-            OccupiedSlots / (float)Capacity,
-            IsFull ? GameGui.DangerColor : GameGui.AccentColor,
-            ""
-        );
+        GUI.Label(new Rect(rect.x + 12f, rect.y + 12f, rect.width - 24f, 24f), "$" + money, GameGui.LabelStyle);
     }
 
     private bool TryFindFreeSpace(int width, int height, out int gridX, out int gridY)
@@ -520,9 +515,7 @@ public class PlayerInventory : MonoBehaviour
 
         string alias = GetIconLookupAlias(lookupName);
         Sprite databaseIcon = database != null
-            ? FindIconInDefinitions(database.treasures, lookupName, alias)
-                ?? FindIconInDefinitions(database.generalTerrainTreasures, lookupName, alias)
-                ?? FindIconInDefinitions(database.searchAreaTreasures, lookupName, alias)
+            ? FindIconInDefinitions(database.GetAllIconDefinitions(), lookupName, alias)
             : null;
 
         return databaseIcon != null ? databaseIcon : GetGeneratedItemIcon(lookupName);
@@ -572,12 +565,12 @@ public class PlayerInventory : MonoBehaviour
                 return "Old Coin";
             case "Bent Spoon":
                 return "Silver Teaspoon";
-            case "Lost Key":
-                return "Old Key";
             case "Gold Ring":
-                return "Gold Ring With Red Stone";
+                return "Plain Gold Wedding Band";
             case "Jeweled Compass":
                 return "Compass";
+            case "Working Pocket Watch":
+                return "Pocket Watch";
             default:
                 return itemName;
         }
