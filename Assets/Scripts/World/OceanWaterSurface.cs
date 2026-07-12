@@ -84,11 +84,18 @@ public class OceanWaterSurface : MonoBehaviour
 
         Material material = meshRenderer.sharedMaterial;
         SetColor(material, "_Color", deepColor);
-        SetColor(material, "_BaseColor", deepColor);
+        SetColor(material, "_BaseColor", shallowColor);
         SetColor(material, "_DeepColor", deepColor);
         SetColor(material, "_ShallowColor", shallowColor);
         SetColor(material, "_FoamColor", foamColor);
         SetFloat(material, "_Sparkle", sparkle);
+
+        Light mainLight = RenderSettings.sun;
+
+        if (mainLight != null)
+        {
+            SetVector(material, "_WorldLightDir", -mainLight.transform.forward);
+        }
     }
 
     private void OnDisable()
@@ -236,7 +243,7 @@ public class OceanWaterSurface : MonoBehaviour
         }
 
         SetColor(material, "_Color", deepColor);
-        SetColor(material, "_BaseColor", deepColor);
+        SetColor(material, "_BaseColor", shallowColor);
         SetColor(material, "_DeepColor", deepColor);
         SetColor(material, "_ShallowColor", shallowColor);
         SetColor(material, "_FoamColor", foamColor);
@@ -337,6 +344,14 @@ public class OceanWaterSurface : MonoBehaviour
         if (material.HasProperty(propertyName))
         {
             material.SetFloat(propertyName, value);
+        }
+    }
+
+    private static void SetVector(Material material, string propertyName, Vector4 value)
+    {
+        if (material.HasProperty(propertyName))
+        {
+            material.SetVector(propertyName, value);
         }
     }
 }

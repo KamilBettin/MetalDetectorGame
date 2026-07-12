@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 using Object = UnityEngine.Object;
 
 public class SceneTransitionManager : MonoBehaviour
@@ -34,6 +35,11 @@ public class SceneTransitionManager : MonoBehaviour
     private static LightmapsMode savedLightmapsMode;
     private static LightProbes savedLightProbes;
     private static readonly List<DirectionalLightState> savedDirectionalLights = new List<DirectionalLightState>();
+
+    private const float FadeOutDuration = 0.28f;
+    private const float FadeInDuration = 0.42f;
+    private Canvas fadeCanvas;
+    private CanvasGroup fadeCanvasGroup;
 
     private struct DirectionalLightState
     {
@@ -162,6 +168,7 @@ public class SceneTransitionManager : MonoBehaviour
 
         instance = this;
         DontDestroyOnLoad(gameObject);
+        BuildFadeOverlay();
         SceneManager.sceneLoaded -= HandleSceneLoaded;
         SceneManager.sceneLoaded += HandleSceneLoaded;
     }
@@ -197,16 +204,8 @@ public class SceneTransitionManager : MonoBehaviour
         worldReturnRotation = returnRotation;
         hasWorldReturnPosition = true;
         CloseTransientMenus();
-
-        Scene interiorScene = GetHomeInteriorScene();
-
-        if (interiorScene.IsValid() && interiorScene.isLoaded)
-        {
-            EnterLoadedHomeInterior(interiorScene);
-            return;
-        }
-
-        StartCoroutine(EnterHomeInteriorWhenLoaded());
+        isTransitioning = true;
+        StartCoroutine(EnterHomeInteriorTransition());
     }
 
     private void BeginExitHomeInterior()
@@ -218,6 +217,12 @@ public class SceneTransitionManager : MonoBehaviour
 
         CapturePersistentPlayer();
         CloseTransientMenus();
+        isTransitioning = true;
+        StartCoroutine(ExitHomeInteriorTransition());
+    }
+
+    private void CompleteExitHomeInterior()
+    {
 
         if (hasWorldReturnPosition)
         {
@@ -258,7 +263,6 @@ public class SceneTransitionManager : MonoBehaviour
 
     private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
     {
-        isTransitioning = false;
         CapturePersistentPlayer();
         DestroyDuplicatePlayers();
 
@@ -291,27 +295,44 @@ public class SceneTransitionManager : MonoBehaviour
         }
     }
 
-    private IEnumerator EnterHomeInteriorWhenLoaded()
+    private IEnumerator EnterHomeInteriorTransition()
     {
-        isTransitioning = true;
-        AsyncOperation loadOperation = PreloadHomeInteriorIfNeeded();
-
-        while (loadOperation != null && !loadOperation.isDone)
-        {
-            yield return null;
-        }
+        yield return FadeScreen(1f, FadeOutDuration);
 
         Scene interiorScene = GetHomeInteriorScene();
+
+        if (!interiorScene.IsValid() || !interiorScene.isLoaded)
+        {
+            AsyncOperation loadOperation = PreloadHomeInteriorIfNeeded();
+
+            while (loadOperation != null && !loadOperation.isDone)
+            {
+                yield return null;
+            }
+
+            interiorScene = GetHomeInteriorScene();
+        }
 
         if (interiorScene.IsValid() && interiorScene.isLoaded)
         {
             EnterLoadedHomeInterior(interiorScene);
+            yield return null;
         }
         else
         {
             Debug.LogWarning("Cannot enter home interior because the interior scene did not load.");
         }
 
+        yield return FadeScreen(0f, FadeInDuration);
+        isTransitioning = false;
+    }
+
+    private IEnumerator ExitHomeInteriorTransition()
+    {
+        yield return FadeScreen(1f, FadeOutDuration);
+        CompleteExitHomeInterior();
+        yield return null;
+        yield return FadeScreen(0f, FadeInDuration);
         isTransitioning = false;
     }
 
@@ -339,7 +360,6 @@ public class SceneTransitionManager : MonoBehaviour
 
     private void EnterLoadedHomeInterior(Scene interiorScene)
     {
-        isTransitioning = false;
         isPlayerInsideHomeInterior = true;
         SetHomeInteriorVisible(true);
         PrepareHomeInteriorScene();
@@ -356,6 +376,67 @@ public class SceneTransitionManager : MonoBehaviour
             {
                 SceneManager.SetActiveScene(interiorScene);
             }
+        }
+    }
+
+    private void BuildFadeOverlay()
+    {
+        if (fadeCanvas != null)
+        {
+            return;
+        }
+
+        GameObject canvasObject = new GameObject("Scene Fade Canvas", typeof(RectTransform));
+        canvasObject.transform.SetParent(transform, false);
+        fadeCanvas = canvasObject.AddComponent<Canvas>();
+        fadeCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        fadeCanvas.sortingOrder = 20000;
+        fadeCanvasGroup = canvasObject.AddComponent<CanvasGroup>();
+        fadeCanvasGroup.alpha = 0f;
+        fadeCanvasGroup.blocksRaycasts = false;
+        fadeCanvasGroup.interactable = false;
+
+        GameObject fadeObject = new GameObject("Scene Fade", typeof(RectTransform));
+        fadeObject.transform.SetParent(canvasObject.transform, false);
+        RectTransform fadeRect = fadeObject.GetComponent<RectTransform>();
+        fadeRect.anchorMin = Vector2.zero;
+        fadeRect.anchorMax = Vector2.one;
+        fadeRect.offsetMin = Vector2.zero;
+        fadeRect.offsetMax = Vector2.zero;
+
+        Image fadeImage = fadeObject.AddComponent<Image>();
+        fadeImage.color = Color.black;
+        fadeImage.raycastTarget = true;
+        fadeCanvas.enabled = false;
+    }
+
+    private IEnumerator FadeScreen(float targetAlpha, float duration)
+    {
+        if (fadeCanvas == null || fadeCanvasGroup == null)
+        {
+            BuildFadeOverlay();
+        }
+
+        fadeCanvas.enabled = true;
+        fadeCanvasGroup.blocksRaycasts = true;
+        float startAlpha = fadeCanvasGroup.alpha;
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float progress = duration <= 0f ? 1f : Mathf.Clamp01(elapsed / duration);
+            progress = progress * progress * (3f - 2f * progress);
+            fadeCanvasGroup.alpha = Mathf.Lerp(startAlpha, targetAlpha, progress);
+            yield return null;
+        }
+
+        fadeCanvasGroup.alpha = targetAlpha;
+
+        if (targetAlpha <= 0f)
+        {
+            fadeCanvasGroup.blocksRaycasts = false;
+            fadeCanvas.enabled = false;
         }
     }
 
@@ -1014,7 +1095,7 @@ public class ScenePortal : MonoBehaviour
         ResolvePlayer();
         UpdateHighlight();
 
-        if (Keyboard.current == null || !Keyboard.current.eKey.wasPressedThisFrame || !IsPlayerInRange() || GameUIState.AnyMenuOpen)
+        if (Keyboard.current == null || !Keyboard.current.eKey.wasPressedThisFrame || !IsPlayerInRange() || !GameUIState.CanProcessGameplayInput)
         {
             return;
         }
@@ -1032,7 +1113,7 @@ public class ScenePortal : MonoBehaviour
 
     private void OnGUI()
     {
-        if (IsPlayerInRange() && !GameUIState.AnyMenuOpen)
+        if (IsPlayerInRange() && GameUIState.CanProcessGameplayInput)
         {
             GameGui.DrawToast(new Rect(Screen.width * 0.5f - 190f, Screen.height - 178f, 380f, 40f), GetPromptText());
         }
@@ -1067,7 +1148,7 @@ public class ScenePortal : MonoBehaviour
 
     private void UpdateHighlight()
     {
-        SetHighlighted(IsPlayerInRange() && !GameUIState.AnyMenuOpen);
+        SetHighlighted(IsPlayerInRange() && GameUIState.CanProcessGameplayInput);
     }
 
     private void SetHighlighted(bool highlighted)

@@ -139,6 +139,35 @@ public class SearchArea : MonoBehaviour
     {
         SetObjectsActive(lockedObjects, !isUnlocked);
         SetObjectsActive(unlockedObjects, isUnlocked);
+
+        // Keep the original purchase sign in place after unlocking. Older scenes
+        // contain a separate owned sign with a slightly different transform, which
+        // made the sign visibly jump when the active object was swapped.
+        SearchAreaPurchasePoint[] purchasePoints = GetComponentsInChildren<SearchAreaPurchasePoint>(true);
+
+        foreach (SearchAreaPurchasePoint purchasePoint in purchasePoints)
+        {
+            if (purchasePoint == null)
+            {
+                continue;
+            }
+
+            purchasePoint.gameObject.SetActive(true);
+            purchasePoint.RefreshSignVisual();
+        }
+
+        if (unlockedObjects == null)
+        {
+            return;
+        }
+
+        foreach (GameObject target in unlockedObjects)
+        {
+            if (target != null && target.name.Contains("Owned Sign"))
+            {
+                target.SetActive(false);
+            }
+        }
     }
 
     private void SetObjectsActive(GameObject[] objects, bool isActive)

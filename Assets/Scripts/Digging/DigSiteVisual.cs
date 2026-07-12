@@ -1108,10 +1108,11 @@ public class DigSiteVisual : MonoBehaviour
             SetTexture(material, occlusionTexture, "_OcclusionMap");
         }
 
-        SetMaterialColor(material, Color.white);
-        SetFloat(material, 0.7f, "_Metallic");
-        SetFloat(material, 0.5f, "_Smoothness", "_Glossiness");
-        SetFloat(material, 1f, "_OcclusionStrength");
+        SetMaterialColor(material, new Color(1.12f, 1.08f, 1.02f, 1f));
+        SetFloat(material, 0.35f, "_Metallic");
+        SetFloat(material, 0.4f, "_Smoothness", "_Glossiness");
+        SetFloat(material, 0.65f, "_BumpScale", "_NormalScale");
+        SetFloat(material, 0.2f, "_OcclusionStrength");
         material.EnableKeyword("_METALLICSPECGLOSSMAP");
         ConfigureOpaqueMaterial(material);
         return material;

@@ -51,7 +51,10 @@ public class UpgradeShop : MonoBehaviour
 
     private void Update()
     {
-        if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame && IsPlayerNearShop())
+        if (Keyboard.current != null
+            && Keyboard.current.eKey.wasPressedThisFrame
+            && IsPlayerNearShop()
+            && (isMenuOpen || GameUIState.CanProcessGameplayInput))
         {
             SetMenuOpen(!isMenuOpen);
         }

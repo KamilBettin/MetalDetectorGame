@@ -1,0 +1,13 @@
+"AppBuild"
+{
+    "AppID"        "4916780"
+    "Desc"         "Windows review build 0.1.0"
+    "BuildOutput"  "C:\Users\Kamil\MetalDetectorGame\SteamUpload\output"
+    "ContentRoot"  "C:\Users\Kamil\MetalDetectorGame\Builds"
+    "Preview"      "0"
+
+    "Depots"
+    {
+        "4916781"  "depot_build_4916781.vdf"
+    }
+}

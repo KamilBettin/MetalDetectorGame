@@ -7,7 +7,7 @@ public class PlayerInventory : MonoBehaviour
 {
     private const int MinimumGridSize = 3;
     private const int MaximumArtGridSize = 5;
-    private const int TrailerStartingMoney = 1000;
+    private const int TrailerStartingMoney = 5000;
     public const float BoardAspect = 4f / 3f;
     private static readonly Dictionary<int, Texture2D> BoardTextures = new Dictionary<int, Texture2D>();
     private static readonly Dictionary<string, Sprite> GeneratedItemIcons = new Dictionary<string, Sprite>();
@@ -205,7 +205,14 @@ public class PlayerInventory : MonoBehaviour
 
         if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
         {
-            SetOpen(!isOpen);
+            if (isOpen)
+            {
+                SetOpen(false);
+            }
+            else if (GameUIState.CanProcessGameplayInput)
+            {
+                SetOpen(true);
+            }
         }
 
         if (isOpen && Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)

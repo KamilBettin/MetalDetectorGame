@@ -35,6 +35,7 @@ Shader "MetalDetector/Ocean Water"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -50,6 +51,7 @@ Shader "MetalDetector/Ocean Water"
                 float4 positionHCS : SV_POSITION;
                 float3 positionWS : TEXCOORD0;
                 float2 uv : TEXCOORD1;
+                float fogFactor : TEXCOORD2;
             };
 
             CBUFFER_START(UnityPerMaterial)
@@ -84,6 +86,7 @@ Shader "MetalDetector/Ocean Water"
                 output.positionWS = TransformObjectToWorld(positionOS);
                 output.positionHCS = TransformWorldToHClip(output.positionWS);
                 output.uv = input.uv;
+                output.fogFactor = ComputeFogFactor(output.positionHCS.z);
                 return output;
             }
 
@@ -116,7 +119,8 @@ Shader "MetalDetector/Ocean Water"
                 waterColor = lerp(waterColor, skyReflection, saturate(0.34 + fresnel * 0.58));
                 waterColor *= lerp(0.86, 1.16, metalRipple);
                 waterColor += metalRipple * float3(0.035, 0.055, 0.06);
-                waterColor += glint + broadGlint;
+                waterColor += (glint + broadGlint) * mainLight.color;
+                waterColor = MixFog(waterColor, input.fogFactor);
 
                 float alpha = lerp(_DeepColor.a, _ShallowColor.a, saturate(wave * 0.28 + 0.42));
                 alpha = saturate(alpha + fresnel * 0.08);

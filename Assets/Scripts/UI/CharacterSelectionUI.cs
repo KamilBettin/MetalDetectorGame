@@ -36,6 +36,11 @@ public class CharacterSelectionUI : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (GameUIState.IsCharacterSelectionOpen)
+        {
+            GameUIState.SetCharacterSelectionOpen(false);
+        }
+
         if (Instance == this)
         {
             Instance = null;
@@ -126,6 +131,7 @@ public class CharacterSelectionUI : MonoBehaviour
         }
 
         root.gameObject.SetActive(open);
+        GameUIState.SetCharacterSelectionOpen(open);
 
         if (open)
         {

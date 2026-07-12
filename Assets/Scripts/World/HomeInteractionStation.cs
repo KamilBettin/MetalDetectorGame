@@ -35,7 +35,7 @@ public class HomeInteractionStation : MonoBehaviour
             stationMessageTimer -= Time.deltaTime;
         }
 
-        if (Keyboard.current == null || !Keyboard.current.eKey.wasPressedThisFrame || !IsPlayerInRange() || GameUIState.AnyMenuOpen)
+        if (Keyboard.current == null || !Keyboard.current.eKey.wasPressedThisFrame || !IsPlayerInRange() || !GameUIState.CanProcessGameplayInput)
         {
             return;
         }
@@ -45,7 +45,7 @@ public class HomeInteractionStation : MonoBehaviour
 
     private void OnGUI()
     {
-        if (!IsPlayerInRange() || GameUIState.AnyMenuOpen)
+        if (!IsPlayerInRange() || !GameUIState.CanProcessGameplayInput)
         {
             return;
         }
@@ -165,7 +165,7 @@ public class HomeInteractionStation : MonoBehaviour
             }
         }
 
-        interactionHighlight.SetTarget(IsPlayerInRange() && !GameUIState.AnyMenuOpen ? transform : null);
+        interactionHighlight.SetTarget(IsPlayerInRange() && GameUIState.CanProcessGameplayInput ? transform : null);
     }
 }
 

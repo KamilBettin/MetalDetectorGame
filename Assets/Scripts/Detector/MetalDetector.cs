@@ -25,7 +25,7 @@ public class MetalDetector : MonoBehaviour
     public float[] detectorSignalRanges = { 6f, 8f, 10f, 12f };
     public Transform[] detectorTierVisuals;
 
-    public float DetectionRange => GetSignalRangeForTier(DetectorTier);
+    public float DetectionRange => GetSignalRangeForTier(DetectorTier) + GetPurchasedRangeBonus();
     public float CurrentSignal => currentSignal;
     public DetectableTreasure NearestTreasure => nearestTreasure;
     public float CurrentSignalDistanceMeters => currentSignalDistanceMeters;
@@ -87,6 +87,12 @@ public class MetalDetector : MonoBehaviour
 
         int safeTier = Mathf.Clamp(tier, 0, detectorSignalRanges.Length - 1);
         return Mathf.Max(0.1f, detectorSignalRanges[safeTier]);
+    }
+
+    private float GetPurchasedRangeBonus()
+    {
+        float baseRange = GetSignalRangeForTier(0);
+        return Mathf.Max(0f, detectionRange - baseRange);
     }
 
     public string GetDetectorName(int tier)

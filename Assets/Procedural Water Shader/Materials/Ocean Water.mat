@@ -108,11 +108,11 @@ Material:
     - _UnderwaterTurbulenceSpeed: 1
     - _ZWrite: 1
     m_Colors:
-    - _BaseColor: {r: 0.014768325, g: 0.20509364, b: 0.28083467, a: 0.86425894}
+    - _BaseColor: {r: 0.09, g: 0.39647812, b: 0.44265512, a: 0.75529194}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
-    - _DeepColor: {r: 0.014768325, g: 0.20509364, b: 0.28083467, a: 0.86425894}
+    - _DeepColor: {r: 0.01696989, g: 0.19323906, b: 0.26559308, a: 0.867646}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _FoamColor: {r: 0.7472231, g: 0.88805777, b: 0.86166936, a: 1}
+    - _FoamColor: {r: 0.73706204, g: 0.8626551, b: 0.8311861, a: 1}
     - _GAmplitude: {r: 0.55, g: 0.42, b: 0.3, a: 0.22}
     - _GDirectionAB: {r: 0.85, g: 0.35, b: 0.5, a: 0.86}
     - _GDirectionCD: {r: 0.2, g: 0.98, b: -0.75, a: 0.55}
@@ -121,6 +121,6 @@ Material:
     - _GSteepness: {r: 0.95, g: 0.85, b: 0.75, a: 0.65}
     - _ReflectionColor: {r: 0.7, g: 0.9, b: 1, a: 0.69803923}
     - _SpecularColor: {r: 1, g: 1, b: 1, a: 0.54901963}
-    - _WorldLightDir: {r: 0.25, g: 0.85, b: -0.35, a: 0}
+    - _WorldLightDir: {r: 0.5580395, g: 0.74917245, b: -0.35683697, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

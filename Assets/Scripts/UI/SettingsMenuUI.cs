@@ -61,6 +61,11 @@ public class SettingsMenuUI : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (GameUIState.IsSettingsMenuOpen)
+        {
+            GameUIState.SetSettingsMenuOpen(false);
+        }
+
         if (Instance == this)
         {
             Instance = null;
@@ -161,6 +166,7 @@ public class SettingsMenuUI : MonoBehaviour
         }
 
         root.gameObject.SetActive(open);
+        GameUIState.SetSettingsMenuOpen(open);
 
         if (open)
         {

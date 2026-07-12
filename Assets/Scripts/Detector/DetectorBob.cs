@@ -17,7 +17,8 @@ public class DetectorBob : MonoBehaviour
 
     private void Update()
     {
-        bool isMoving = Keyboard.current != null
+        bool isMoving = GameUIState.CanProcessGameplayInput
+            && Keyboard.current != null
             && (Keyboard.current.wKey.isPressed
                 || Keyboard.current.aKey.isPressed
                 || Keyboard.current.sKey.isPressed

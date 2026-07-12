@@ -256,7 +256,7 @@ public class DayNightCycle : MonoBehaviour
             float moonArc = Mathf.Sin(t * Mathf.PI);
             sunLight.intensity = Mathf.Lerp(0.16f, 0.28f, Mathf.Pow(moonArc, 0.65f));
             sunLight.color = nightLightColor;
-            sunLight.transform.rotation = Quaternion.Euler(52f, 136f, 0f);
+            sunLight.transform.rotation = GetCelestialLightRotation(true, t);
             ApplyWorldShadowSettings(Mathf.Lerp(0.38f, 0.46f, moonArc));
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
             RenderSettings.ambientSkyColor = Color.Lerp(new Color(0.045f, 0.065f, 0.13f), new Color(0.075f, 0.11f, 0.22f), moonArc);
@@ -275,14 +275,14 @@ public class DayNightCycle : MonoBehaviour
         float sunArc = Mathf.Sin(t * Mathf.PI);
         sunLight.intensity = Mathf.Lerp(0.58f, 1.08f, Mathf.Pow(sunArc, 0.58f));
         sunLight.color = Color.Lerp(new Color(1f, 0.7f, 0.43f, 1f), new Color(1f, 0.95f, 0.84f, 1f), sunArc);
-        sunLight.transform.rotation = Quaternion.Euler(58f, -38f, 0f);
-        ApplyWorldShadowSettings(Mathf.Lerp(0.58f, 0.68f, sunArc));
+        sunLight.transform.rotation = GetCelestialLightRotation(false, t);
+        ApplyWorldShadowSettings(Mathf.Lerp(0.45f, 0.55f, sunArc));
         RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-        RenderSettings.ambientSkyColor = Color.Lerp(new Color(0.5f, 0.39f, 0.31f), new Color(0.43f, 0.56f, 0.65f), sunArc);
-        RenderSettings.ambientEquatorColor = Color.Lerp(new Color(0.4f, 0.33f, 0.28f), new Color(0.4f, 0.45f, 0.43f), sunArc);
-        RenderSettings.ambientGroundColor = Color.Lerp(new Color(0.19f, 0.15f, 0.12f), new Color(0.22f, 0.21f, 0.18f), sunArc);
+        RenderSettings.ambientSkyColor = Color.Lerp(new Color(0.55f, 0.44f, 0.36f), new Color(0.48f, 0.62f, 0.71f), sunArc);
+        RenderSettings.ambientEquatorColor = Color.Lerp(new Color(0.46f, 0.39f, 0.34f), new Color(0.46f, 0.51f, 0.49f), sunArc);
+        RenderSettings.ambientGroundColor = Color.Lerp(new Color(0.24f, 0.2f, 0.17f), new Color(0.27f, 0.26f, 0.23f), sunArc);
         RenderSettings.ambientLight = RenderSettings.ambientEquatorColor;
-        RenderSettings.ambientIntensity = Mathf.Lerp(0.64f, 0.78f, sunArc);
+        RenderSettings.ambientIntensity = Mathf.Lerp(0.8f, 0.92f, sunArc);
         RenderSettings.reflectionIntensity = Mathf.Lerp(0.38f, 0.58f, sunArc);
         ApplySkyAppearance(false, sunArc);
         UpdateCelestialBody(false, sunArc, t);
@@ -302,7 +302,9 @@ public class DayNightCycle : MonoBehaviour
         sunLight.shadowBias = 0.04f;
         sunLight.shadowNormalBias = 0.24f;
         sunLight.shadowNearPlane = 0.2f;
+#if UNITY_EDITOR
         sunLight.shadowAngle = 0.55f;
+#endif
     }
 
     private void EnsureRuntimeSky()
@@ -423,10 +425,7 @@ public class DayNightCycle : MonoBehaviour
         celestialBody.SetActive(true);
         float distance = night ? 420f : 500f;
         float diameter = night ? 10f : Mathf.Lerp(14f, 17f, arc);
-        Quaternion visualOrbit = night
-            ? Quaternion.Euler(Mathf.Lerp(28f, 152f, phase), Mathf.Lerp(118f, 158f, phase), 0f)
-            : Quaternion.Euler(Mathf.Lerp(18f, 162f, phase), Mathf.Lerp(-68f, -18f, phase), 0f);
-        Vector3 skyDirection = -(visualOrbit * Vector3.forward).normalized;
+        Vector3 skyDirection = GetCelestialDirection(night, phase);
         celestialBody.transform.position = playerCamera.transform.position + skyDirection * distance;
         celestialBody.transform.localScale = Vector3.one * diameter;
 
@@ -450,6 +449,20 @@ public class DayNightCycle : MonoBehaviour
             celestialMaterial.EnableKeyword("_EMISSION");
             celestialMaterial.SetColor("_EmissionColor", hdrColor);
         }
+    }
+
+    private static Quaternion GetCelestialLightRotation(bool night, float phase)
+    {
+        Vector3 lightDirection = -GetCelestialDirection(night, phase);
+        return Quaternion.LookRotation(lightDirection, Vector3.forward);
+    }
+
+    private static Vector3 GetCelestialDirection(bool night, float phase)
+    {
+        Quaternion visualOrbit = night
+            ? Quaternion.Euler(Mathf.Lerp(28f, 152f, phase), Mathf.Lerp(118f, 158f, phase), 0f)
+            : Quaternion.Euler(Mathf.Lerp(18f, 162f, phase), Mathf.Lerp(-68f, -18f, phase), 0f);
+        return -(visualOrbit * Vector3.forward).normalized;
     }
 
     private void ApplyWaterAppearance(bool night, float arc)

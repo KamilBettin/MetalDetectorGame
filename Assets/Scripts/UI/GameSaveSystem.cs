@@ -4,7 +4,9 @@ using UnityEngine;
 
 public static class GameSaveSystem
 {
-    private const string SaveKey = "MetalDetector.Save.Json";
+    private const string LegacySaveKey = "MetalDetector.Save.Json";
+    private const string SaveSlotKeyPrefix = "MetalDetector.Save.Slot.";
+    public const int SaveSlotCount = 3;
     private const int DefaultDetectorUpgradeCost = 250;
     private const int DetectorUpgradeCostIncrease = 350;
     private const int DefaultRangeUpgradeCost = 140;
@@ -13,15 +15,44 @@ public static class GameSaveSystem
     private const int InventoryUpgradeCostIncrease = 180;
     private const int DefaultShovelUpgradeCost = 550;
     private const int DefaultCraftingUnlockCost = 100;
-    private const int TrailerMinimumMoney = 1000;
+    private const int TrailerMinimumMoney = 5000;
     private const float DefaultDetectorRange = 6f;
     private const float RangeUpgradeStep = 2f;
 
     private static GameSaveData initialDefaults;
     private static GameSaveData pauseResumeSnapshot;
+    private static int activeSlot = -1;
 
-    public static bool HasSavedGame => PlayerPrefs.HasKey(SaveKey);
+    public static bool HasSavedGame
+    {
+        get
+        {
+            MigrateLegacySave();
+
+            for (int slotIndex = 0; slotIndex < SaveSlotCount; slotIndex++)
+            {
+                if (PlayerPrefs.HasKey(GetSaveSlotKey(slotIndex)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    public static int ActiveSlot => activeSlot;
     public static bool HasPauseResumeSnapshot => pauseResumeSnapshot != null;
+
+    public sealed class SaveSlotInfo
+    {
+        public int slotIndex;
+        public bool isOccupied;
+        public bool isValid;
+        public string savedAt = "";
+        public int dayNumber = 1;
+        public int money;
+    }
 
     public static void CaptureInitialDefaults()
     {
@@ -36,62 +67,147 @@ public static class GameSaveSystem
     public static void StartNewGame()
     {
         pauseResumeSnapshot = null;
-        ClearSavedGame();
+        activeSlot = -1;
         ResetRuntimeToDefaults();
     }
 
     public static bool ContinueGame(out string message)
     {
-        if (pauseResumeSnapshot != null)
-        {
-            ApplyData(pauseResumeSnapshot, true);
-            pauseResumeSnapshot = null;
-            message = "Continued paused solo session.";
-            return true;
-        }
+        int slotIndex = FindFirstOccupiedSlot();
 
-        if (!HasSavedGame)
+        if (slotIndex < 0)
         {
             message = "No save file yet. Starting fresh.";
             ResetRuntimeToDefaults();
             return false;
         }
 
-        string json = PlayerPrefs.GetString(SaveKey, "");
+        return ContinueGame(slotIndex, out message);
+    }
 
-        if (string.IsNullOrWhiteSpace(json))
+    public static bool ContinueGame(int slotIndex, out string message)
+    {
+        MigrateLegacySave();
+
+        if (!IsValidSlot(slotIndex))
         {
-            message = "Save file is empty. Starting fresh.";
-            ResetRuntimeToDefaults();
+            message = "Invalid save slot.";
             return false;
         }
 
-        GameSaveData data = JsonUtility.FromJson<GameSaveData>(json);
+        string saveKey = GetSaveSlotKey(slotIndex);
+
+        if (!PlayerPrefs.HasKey(saveKey))
+        {
+            message = "This save slot is empty.";
+            return false;
+        }
+
+        string json = PlayerPrefs.GetString(saveKey, "");
+
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            message = "This save slot is empty.";
+            return false;
+        }
+
+        GameSaveData data;
+
+        try
+        {
+            data = JsonUtility.FromJson<GameSaveData>(json);
+        }
+        catch (Exception)
+        {
+            data = null;
+        }
 
         if (data == null)
         {
-            message = "Save file could not be loaded. Starting fresh.";
-            ResetRuntimeToDefaults();
+            message = "Save slot " + (slotIndex + 1) + " could not be loaded.";
             return false;
         }
 
         ApplyData(data, true);
-        message = string.IsNullOrEmpty(data.savedAt) ? "Save loaded." : "Loaded save from " + data.savedAt + ".";
+        activeSlot = slotIndex;
+        pauseResumeSnapshot = null;
+        message = string.IsNullOrEmpty(data.savedAt)
+            ? "Loaded save slot " + (slotIndex + 1) + "."
+            : "Loaded slot " + (slotIndex + 1) + " from " + data.savedAt + ".";
         return true;
     }
 
     public static bool SaveCurrentGame(out string message)
     {
+        int slotIndex = IsValidSlot(activeSlot) ? activeSlot : 0;
+        return SaveCurrentGame(slotIndex, out message);
+    }
+
+    public static bool SaveCurrentGame(int slotIndex, out string message)
+    {
+        if (!IsValidSlot(slotIndex))
+        {
+            message = "Invalid save slot.";
+            return false;
+        }
+
         LocalCoopManager coopManager = LocalCoopManager.Instance;
 
         GameSaveData data = CaptureCurrentData();
         data.savedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-        PlayerPrefs.SetString(SaveKey, JsonUtility.ToJson(data));
+        PlayerPrefs.SetString(GetSaveSlotKey(slotIndex), JsonUtility.ToJson(data));
         PlayerPrefs.Save();
+        activeSlot = slotIndex;
         message = coopManager != null && (coopManager.IsRunning || coopManager.RemotePlayerCount > 0)
-            ? "Multiplayer game saved."
-            : "Game saved.";
+            ? "Multiplayer game saved in slot " + (slotIndex + 1) + "."
+            : "Game saved in slot " + (slotIndex + 1) + ".";
         return true;
+    }
+
+    public static SaveSlotInfo GetSaveSlotInfo(int slotIndex)
+    {
+        MigrateLegacySave();
+
+        SaveSlotInfo info = new SaveSlotInfo
+        {
+            slotIndex = slotIndex,
+            isOccupied = false,
+            isValid = false
+        };
+
+        if (!IsValidSlot(slotIndex))
+        {
+            return info;
+        }
+
+        string saveKey = GetSaveSlotKey(slotIndex);
+
+        if (!PlayerPrefs.HasKey(saveKey))
+        {
+            return info;
+        }
+
+        info.isOccupied = true;
+        string json = PlayerPrefs.GetString(saveKey, "");
+
+        try
+        {
+            GameSaveData data = JsonUtility.FromJson<GameSaveData>(json);
+
+            if (data != null)
+            {
+                info.isValid = true;
+                info.savedAt = data.savedAt ?? "";
+                info.dayNumber = Mathf.Max(1, data.dayNumber);
+                info.money = Mathf.Max(0, data.money);
+            }
+        }
+        catch (Exception)
+        {
+            info.isValid = false;
+        }
+
+        return info;
     }
 
     public static void CapturePauseResumeSnapshotIfSolo()
@@ -114,11 +230,78 @@ public static class GameSaveSystem
 
     public static void ClearSavedGame()
     {
-        if (PlayerPrefs.HasKey(SaveKey))
+        bool changed = false;
+
+        for (int slotIndex = 0; slotIndex < SaveSlotCount; slotIndex++)
         {
-            PlayerPrefs.DeleteKey(SaveKey);
+            string saveKey = GetSaveSlotKey(slotIndex);
+
+            if (!PlayerPrefs.HasKey(saveKey))
+            {
+                continue;
+            }
+
+            PlayerPrefs.DeleteKey(saveKey);
+            changed = true;
+        }
+
+        if (PlayerPrefs.HasKey(LegacySaveKey))
+        {
+            PlayerPrefs.DeleteKey(LegacySaveKey);
+            changed = true;
+        }
+
+        if (changed)
+        {
             PlayerPrefs.Save();
         }
+
+        activeSlot = -1;
+    }
+
+    private static int FindFirstOccupiedSlot()
+    {
+        MigrateLegacySave();
+
+        for (int slotIndex = 0; slotIndex < SaveSlotCount; slotIndex++)
+        {
+            SaveSlotInfo info = GetSaveSlotInfo(slotIndex);
+
+            if (info.isOccupied && info.isValid)
+            {
+                return slotIndex;
+            }
+        }
+
+        return -1;
+    }
+
+    private static void MigrateLegacySave()
+    {
+        if (!PlayerPrefs.HasKey(LegacySaveKey))
+        {
+            return;
+        }
+
+        string firstSlotKey = GetSaveSlotKey(0);
+
+        if (!PlayerPrefs.HasKey(firstSlotKey))
+        {
+            PlayerPrefs.SetString(firstSlotKey, PlayerPrefs.GetString(LegacySaveKey, ""));
+        }
+
+        PlayerPrefs.DeleteKey(LegacySaveKey);
+        PlayerPrefs.Save();
+    }
+
+    private static bool IsValidSlot(int slotIndex)
+    {
+        return slotIndex >= 0 && slotIndex < SaveSlotCount;
+    }
+
+    private static string GetSaveSlotKey(int slotIndex)
+    {
+        return SaveSlotKeyPrefix + slotIndex;
     }
 
     private static void ResetRuntimeToDefaults()
@@ -437,7 +620,10 @@ public static class GameSaveSystem
         if (detector != null)
         {
             detector.detectorTier = Mathf.Clamp(data.detectorTier, 0, detector.MaxDetectorTier);
-            detector.detectionRange = detector.GetSignalRangeForTier(detector.DetectorTier);
+            float tierRange = detector.GetSignalRangeForTier(detector.DetectorTier);
+            float savedEffectiveRange = data.detectorRange > 0f ? data.detectorRange : tierRange;
+            float purchasedRangeBonus = Mathf.Max(0f, savedEffectiveRange - tierRange);
+            detector.detectionRange = detector.GetSignalRangeForTier(0) + purchasedRangeBonus;
         }
 
     }

@@ -580,9 +580,9 @@ public static class PostProcessingBootstrapper
         bloom.intensity.Override(bloomIntensity);
         bloom.scatter.Override(bloomScatter);
         bloom.tint.Override(Color.white);
-        bloom.highQualityFiltering.Override(false);
-        bloom.downscale.Override(BloomDownscaleMode.Quarter);
-        bloom.maxIterations.Override(4);
+        bloom.highQualityFiltering.Override(true);
+        bloom.downscale.Override(BloomDownscaleMode.Half);
+        bloom.maxIterations.Override(6);
 
         Vignette vignette = Add<Vignette>(profile);
         vignette.color.Override(Color.black);
@@ -628,8 +628,8 @@ public static class PostProcessingBootstrapper
             }
             else
             {
-                colorAdjustments.postExposure.Override(Mathf.Lerp(0.025f, 0.11f, arc));
-                colorAdjustments.contrast.Override(Mathf.Lerp(6f, 8f, arc));
+                colorAdjustments.postExposure.Override(Mathf.Lerp(0.055f, 0.14f, arc));
+                colorAdjustments.contrast.Override(Mathf.Lerp(4f, 6f, arc));
                 colorAdjustments.saturation.Override(Mathf.Lerp(5f, 8f, arc));
                 colorAdjustments.colorFilter.Override(Color.Lerp(new Color(1f, 0.91f, 0.82f), new Color(1f, 0.99f, 0.95f), arc));
             }
@@ -643,7 +643,7 @@ public static class PostProcessingBootstrapper
 
         if (profile.TryGet(out Bloom bloom))
         {
-            bloom.intensity.Override(isNight ? Mathf.Lerp(0.2f, 0.26f, arc) : Mathf.Lerp(0.2f, 0.14f, arc));
+            bloom.intensity.Override(isNight ? Mathf.Lerp(0.23f, 0.3f, arc) : Mathf.Lerp(0.23f, 0.17f, arc));
             bloom.threshold.Override(isNight ? 0.82f : Mathf.Lerp(0.92f, 1.08f, arc));
             bloom.tint.Override(isNight ? new Color(0.72f, 0.82f, 1f) : Color.Lerp(new Color(1f, 0.76f, 0.5f), Color.white, arc));
         }
@@ -663,27 +663,29 @@ public static class PostProcessingBootstrapper
             }
             else
             {
-                colorWheels.shadows.Override(Vector4.Lerp(new Vector4(0.94f, 1f, 1.08f, 0f), new Vector4(0.96f, 1.015f, 1.055f, 0f), arc));
-                colorWheels.midtones.Override(new Vector4(1f, 1f, 1f, 0f));
+                colorWheels.shadows.Override(Vector4.Lerp(new Vector4(0.96f, 1.01f, 1.08f, 0.012f), new Vector4(0.98f, 1.02f, 1.055f, 0.008f), arc));
+                colorWheels.midtones.Override(new Vector4(1f, 1f, 1f, 0.004f));
                 colorWheels.highlights.Override(Vector4.Lerp(new Vector4(1.08f, 1.015f, 0.92f, 0f), new Vector4(1.035f, 1.01f, 0.975f, 0f), arc));
             }
         }
 
         RenderSettings.fog = true;
-        RenderSettings.fogMode = FogMode.Linear;
+        RenderSettings.fogMode = FogMode.ExponentialSquared;
 
         if (isNight)
         {
             RenderSettings.fogColor = Color.Lerp(new Color(0.035f, 0.055f, 0.11f), new Color(0.055f, 0.085f, 0.16f), arc);
-            RenderSettings.fogStartDistance = Mathf.Lerp(90f, 120f, arc);
-            RenderSettings.fogEndDistance = Mathf.Lerp(500f, 610f, arc);
+            RenderSettings.fogDensity = Mathf.Lerp(0.0027f, 0.00215f, arc);
+            RenderSettings.fogStartDistance = Mathf.Lerp(32f, 52f, arc);
+            RenderSettings.fogEndDistance = Mathf.Lerp(280f, 390f, arc);
             RenderSettings.subtractiveShadowColor = new Color(0.12f, 0.18f, 0.32f, 1f);
         }
         else
         {
             RenderSettings.fogColor = Color.Lerp(new Color(0.7f, 0.58f, 0.47f), new Color(0.55f, 0.72f, 0.8f), arc);
-            RenderSettings.fogStartDistance = Mathf.Lerp(125f, 210f, arc);
-            RenderSettings.fogEndDistance = Mathf.Lerp(650f, 900f, arc);
+            RenderSettings.fogDensity = Mathf.Lerp(0.00215f, 0.0017f, arc);
+            RenderSettings.fogStartDistance = Mathf.Lerp(45f, 78f, arc);
+            RenderSettings.fogEndDistance = Mathf.Lerp(330f, 480f, arc);
             RenderSettings.subtractiveShadowColor = Color.Lerp(new Color(0.34f, 0.38f, 0.48f), new Color(0.3f, 0.39f, 0.5f), arc);
         }
     }

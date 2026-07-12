@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -21,6 +22,14 @@ public class SearchAreaPurchasePoint : MonoBehaviour
         {
             targetArea = GetComponentInParent<SearchArea>();
         }
+
+        RefreshSignVisual();
+    }
+
+    private void OnEnable()
+    {
+        GameLocalization.LanguageChanged += RefreshSignVisual;
+        RefreshSignVisual();
     }
 
     private void Update()
@@ -101,7 +110,7 @@ public class SearchAreaPurchasePoint : MonoBehaviour
             && !targetArea.isUnlocked
             && playerInventory != null
             && IsPlayerInRange()
-            && !GameUIState.AnyMenuOpen
+            && GameUIState.CanProcessGameplayInput
             && !pendingUnlockConfirmation;
     }
 
@@ -153,7 +162,32 @@ public class SearchAreaPurchasePoint : MonoBehaviour
 
     private void OnDisable()
     {
+        GameLocalization.LanguageChanged -= RefreshSignVisual;
         SetUnlockConfirmationOpen(false);
+    }
+
+    public void RefreshSignVisual()
+    {
+        if (targetArea == null)
+        {
+            targetArea = GetComponentInParent<SearchArea>();
+        }
+
+        if (targetArea == null || !targetArea.isUnlocked)
+        {
+            return;
+        }
+
+        TextMeshPro[] signTexts = GetComponentsInChildren<TextMeshPro>(true);
+
+        foreach (TextMeshPro signText in signTexts)
+        {
+            if (signText != null && (signText.name == "Sign Text Front" || signText.name == "Sign Text Back"))
+            {
+                signText.text = GameLocalization.T("area.purchased");
+                signText.ForceMeshUpdate();
+            }
+        }
     }
 
     private void SetUnlockConfirmationOpen(bool isOpen)
@@ -179,7 +213,7 @@ public class SearchAreaPurchasePoint : MonoBehaviour
             return;
         }
 
-        if (IsPlayerInRange() && !GameUIState.AnyMenuOpen && !pendingUnlockConfirmation)
+        if (IsPlayerInRange() && GameUIState.CanProcessGameplayInput && !pendingUnlockConfirmation)
         {
             string action = targetArea.unlockCost <= 0 ? GameLocalization.T("area.claim") : GameLocalization.T("area.buy");
             string price = targetArea.unlockCost <= 0 ? GameLocalization.T("area.free") : "$" + targetArea.unlockCost;

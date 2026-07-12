@@ -15,6 +15,11 @@ public class LocalCoopManager : MonoBehaviour
     private const string DefaultPlayerName = "Hunter";
     private const float RemoteLerpSpeed = 10f;
     private const float HostClockSyncInterval = 2f;
+    private const string LocalDetectorShadowName = "MetalDetector_Shadow";
+    private const float DefaultRemoteFeetOffset = -1f;
+    private const float RemoteSoleClearance = 0.025f;
+    private const float RemoteNameCharacterSize = 0.055f;
+    private const float RemoteNameHeadClearance = 0.22f;
 
     public enum CoopRole
     {
@@ -61,6 +66,7 @@ public class LocalCoopManager : MonoBehaviour
         public Vector3 targetPosition;
         public Quaternion targetRotation;
         public int characterIndex = -1;
+        public bool feetAligned;
     }
 
     public static LocalCoopManager Instance { get; private set; }
@@ -132,12 +138,16 @@ public class LocalCoopManager : MonoBehaviour
         Instance = this;
         DontDestroyOnLoad(gameObject);
         GameEvents.TreasureFound += HandleLocalTreasureFound;
+
+        SteamCoopTransport transport = EnsureSteamTransport();
+        transport?.StartTransport(this);
     }
 
     private void OnDestroy()
     {
         GameEvents.TreasureFound -= HandleLocalTreasureFound;
         StopSession();
+        steamTransport?.StopTransport();
 
         if (Instance == this)
         {
@@ -234,18 +244,27 @@ public class LocalCoopManager : MonoBehaviour
         nextPeerId = 2;
         usingSteamTransport = true;
         Role = CoopRole.Host;
-        StatusText = "Steam host ready. Your Steam ID: " + steamTransport.LocalSteamId;
+        StatusText = "Creating friends-only Steam lobby...";
+
+        if (!steamTransport.StartFriendsOnlyLobby())
+        {
+            StatusText = steamTransport.StatusText;
+            usingSteamTransport = false;
+            Role = CoopRole.Offline;
+            return false;
+        }
+
         return true;
     }
 
-    public bool StartSteamClient(ulong hostSteamId, string playerName = DefaultPlayerName)
+    public bool StartSteamClient(ulong lobbyId, string playerName = DefaultPlayerName)
     {
         StopSession();
         steamTransport = EnsureSteamTransport();
 
-        if (hostSteamId == 0)
+        if (lobbyId == 0)
         {
-            StatusText = "Enter host Steam ID.";
+            StatusText = "Steam lobby ID is invalid.";
             StopSteamOnly();
             return false;
         }
@@ -258,11 +277,75 @@ public class LocalCoopManager : MonoBehaviour
         }
 
         localPlayerName = CleanPlayerName(playerName);
+        StatusText = "Joining Steam lobby...";
+
+        if (!steamTransport.JoinLobby(lobbyId))
+        {
+            StatusText = steamTransport.StatusText;
+            return false;
+        }
+
+        return true;
+    }
+
+    public void PrepareForSteamLobbyJoin(string playerName)
+    {
+        StopSession();
+        localPlayerName = CleanPlayerName(playerName);
+        StatusText = "Joining Steam friend lobby...";
+    }
+
+    public void ConnectToSteamLobbyHost(ulong hostSteamId, string playerName)
+    {
+        if (hostSteamId == 0 || steamTransport == null)
+        {
+            NotifySteamLobbyFailed("Steam lobby host is invalid.");
+            return;
+        }
+
+        localPlayerName = CleanPlayerName(playerName);
         usingSteamTransport = true;
         Role = CoopRole.Client;
         steamTransport.SetHost(hostSteamId);
         steamTransport.SendToHost("HELLO" + MessageSeparator + Escape(localPlayerName));
-        StatusText = "Connecting to Steam host " + hostSteamId;
+        StatusText = "Connecting to Steam friend...";
+        StartMenuUI.CloseForSteamJoin();
+    }
+
+    public void NotifySteamLobbyHosted(ulong lobbyId)
+    {
+        if (Role != CoopRole.Host)
+        {
+            return;
+        }
+
+        StatusText = "Steam lobby ready - friends only, up to 4 players";
+    }
+
+    public void NotifySteamLobbyFailed(string message)
+    {
+        usingSteamTransport = false;
+        Role = CoopRole.Offline;
+        StatusText = string.IsNullOrWhiteSpace(message) ? "Steam lobby failed." : message;
+    }
+
+    public bool OpenSteamInviteOverlay(out string message)
+    {
+        steamTransport = EnsureSteamTransport();
+
+        if (steamTransport == null || !steamTransport.StartTransport(this))
+        {
+            message = steamTransport != null ? steamTransport.StatusText : "Steam transport is missing.";
+            return false;
+        }
+
+        if (!steamTransport.OpenInviteOverlay())
+        {
+            message = steamTransport.StatusText;
+            return false;
+        }
+
+        message = "Steam invite overlay opened. Any lobby member can invite their friends.";
         return true;
     }
 
@@ -270,7 +353,7 @@ public class LocalCoopManager : MonoBehaviour
     {
         networkThreadsRunning = false;
         usingSteamTransport = false;
-        steamTransport?.StopTransport();
+        steamTransport?.LeaveLobby();
         Role = CoopRole.Offline;
         localPlayerId = 0;
         nextSendTime = 0f;
@@ -1270,15 +1353,16 @@ public class LocalCoopManager : MonoBehaviour
 
         GameObject visual = new GameObject("Visual");
         visual.transform.SetParent(root.transform, false);
+        visual.transform.localPosition = new Vector3(0f, GetRemoteFeetOffset(), 0f);
 
         GameObject label = new GameObject("Name");
         label.transform.SetParent(root.transform, false);
-        label.transform.localPosition = new Vector3(0f, 2.1f, 0f);
+        label.transform.localPosition = new Vector3(0f, 1.25f, 0f);
         TextMesh textMesh = label.AddComponent<TextMesh>();
         textMesh.text = playerName;
         textMesh.anchor = TextAnchor.MiddleCenter;
         textMesh.alignment = TextAlignment.Center;
-        textMesh.characterSize = 0.22f;
+        textMesh.characterSize = RemoteNameCharacterSize;
         textMesh.fontSize = 48;
         textMesh.color = new Color(1f, 0.85f, 0.34f, 1f);
 
@@ -1310,6 +1394,8 @@ public class LocalCoopManager : MonoBehaviour
         }
 
         remotePlayer.characterIndex = characterIndex;
+        remotePlayer.feetAligned = false;
+        remotePlayer.visualRoot.localPosition = new Vector3(0f, GetRemoteFeetOffset(), 0f);
 
         for (int i = remotePlayer.visualRoot.childCount - 1; i >= 0; i--)
         {
@@ -1328,6 +1414,7 @@ public class LocalCoopManager : MonoBehaviour
             }
 
             remoteAvatarObject.transform.localRotation = Quaternion.identity;
+            BuildRemoteDetector(remotePlayer.visualRoot, remoteAvatarObject);
             return;
         }
 
@@ -1349,6 +1436,84 @@ public class LocalCoopManager : MonoBehaviour
         CreateFallbackPart(parent, "Left Leg", PrimitiveType.Cube, new Vector3(-0.12f, 0.42f, 0f), Quaternion.identity, new Vector3(0.16f, 0.68f, 0.16f), bodyMaterial);
         CreateFallbackPart(parent, "Right Leg", PrimitiveType.Cube, new Vector3(0.12f, 0.42f, 0f), Quaternion.identity, new Vector3(0.16f, 0.68f, 0.16f), bodyMaterial);
 
+        BuildRemoteDetector(parent, null);
+    }
+
+    private void BuildRemoteDetector(Transform parent, GameObject remoteAvatarObject)
+    {
+        if (TryCloneLocalDetectorShadow(parent, remoteAvatarObject))
+        {
+            return;
+        }
+
+        BuildFallbackRemoteDetector(parent);
+    }
+
+    private bool TryCloneLocalDetectorShadow(Transform parent, GameObject remoteAvatarObject)
+    {
+        Transform detectorTemplate = FindSceneTransform(LocalDetectorShadowName);
+
+        if (parent == null || detectorTemplate == null)
+        {
+            return false;
+        }
+
+        GameObject detector = Instantiate(detectorTemplate.gameObject);
+        detector.name = "Remote Metal Detector";
+
+        Transform localHand = GetLocalRightHandAnchor();
+        Transform remoteHand = FindHumanoidRightHand(remoteAvatarObject);
+        Vector3 templateWorldScale = detectorTemplate.lossyScale;
+
+        if (localHand != null && remoteHand != null)
+        {
+            Vector3 handLocalPosition = localHand.InverseTransformPoint(detectorTemplate.position);
+            Quaternion handLocalRotation = Quaternion.Inverse(localHand.rotation) * detectorTemplate.rotation;
+            detector.transform.SetParent(remoteHand, false);
+            detector.transform.localPosition = handLocalPosition;
+            detector.transform.localRotation = handLocalRotation;
+        }
+        else
+        {
+            Transform remoteRoot = parent.parent != null ? parent.parent : parent;
+            detector.transform.SetParent(parent, false);
+
+            if (localPlayer != null)
+            {
+                Vector3 playerLocalPosition = localPlayer.InverseTransformPoint(detectorTemplate.position);
+                Quaternion playerLocalRotation = Quaternion.Inverse(localPlayer.rotation) * detectorTemplate.rotation;
+                detector.transform.position = remoteRoot.TransformPoint(playerLocalPosition);
+                detector.transform.rotation = remoteRoot.rotation * playerLocalRotation;
+            }
+        }
+
+        SetWorldScale(detector.transform, templateWorldScale);
+
+        foreach (Renderer detectorRenderer in detector.GetComponentsInChildren<Renderer>(true))
+        {
+            if (detectorRenderer == null)
+            {
+                continue;
+            }
+
+            detectorRenderer.enabled = true;
+            detectorRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+            detectorRenderer.receiveShadows = true;
+        }
+
+        foreach (Collider detectorCollider in detector.GetComponentsInChildren<Collider>(true))
+        {
+            if (detectorCollider != null)
+            {
+                detectorCollider.enabled = false;
+            }
+        }
+
+        return true;
+    }
+
+    private void BuildFallbackRemoteDetector(Transform parent)
+    {
         GameObject detectorHandle = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         detectorHandle.name = "Detector Handle";
         detectorHandle.transform.SetParent(parent, false);
@@ -1366,6 +1531,75 @@ public class LocalCoopManager : MonoBehaviour
         detectorCoil.transform.localScale = new Vector3(0.22f, 0.026f, 0.22f);
         DisableCollider(detectorCoil);
         SetMaterial(detectorCoil, GetRemoteDetectorMaterial());
+    }
+
+    private Transform GetLocalRightHandAnchor()
+    {
+        if (localPlayer == null)
+        {
+            return null;
+        }
+
+        LocalPlayerAvatarVisual localAvatar = localPlayer.GetComponent<LocalPlayerAvatarVisual>();
+        return localAvatar != null ? localAvatar.RightHandAnchor : null;
+    }
+
+    private static Transform FindHumanoidRightHand(GameObject avatarObject)
+    {
+        if (avatarObject == null)
+        {
+            return null;
+        }
+
+        Animator[] animators = avatarObject.GetComponentsInChildren<Animator>(true);
+
+        foreach (Animator animator in animators)
+        {
+            if (animator == null || !animator.isHuman)
+            {
+                continue;
+            }
+
+            Transform rightHand = animator.GetBoneTransform(HumanBodyBones.RightHand);
+
+            if (rightHand != null)
+            {
+                return rightHand;
+            }
+        }
+
+        return null;
+    }
+
+    private static Transform FindSceneTransform(string objectName)
+    {
+        Transform[] transforms = Resources.FindObjectsOfTypeAll<Transform>();
+
+        foreach (Transform candidate in transforms)
+        {
+            if (candidate != null
+                && candidate.name == objectName
+                && candidate.gameObject.scene.IsValid())
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static void SetWorldScale(Transform target, Vector3 worldScale)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        Vector3 parentScale = target.parent != null ? target.parent.lossyScale : Vector3.one;
+        target.localScale = new Vector3(
+            Mathf.Abs(parentScale.x) > 0.0001f ? worldScale.x / parentScale.x : worldScale.x,
+            Mathf.Abs(parentScale.y) > 0.0001f ? worldScale.y / parentScale.y : worldScale.y,
+            Mathf.Abs(parentScale.z) > 0.0001f ? worldScale.z / parentScale.z : worldScale.z);
     }
 
     private GameObject CreateFallbackPart(Transform parent, string partName, PrimitiveType primitiveType, Vector3 localPosition, Quaternion localRotation, Vector3 localScale, Material material)
@@ -1394,12 +1628,130 @@ public class LocalCoopManager : MonoBehaviour
 
             remotePlayer.transform.position = Vector3.Lerp(remotePlayer.transform.position, remotePlayer.targetPosition, Time.unscaledDeltaTime * RemoteLerpSpeed);
             remotePlayer.transform.rotation = Quaternion.Slerp(remotePlayer.transform.rotation, remotePlayer.targetRotation, Time.unscaledDeltaTime * RemoteLerpSpeed);
+            TryAlignRemoteFeet(remotePlayer);
+            UpdateRemoteNamePosition(remotePlayer);
 
             if (remotePlayer.nameText != null && mainCamera != null)
             {
                 remotePlayer.nameText.transform.rotation = Quaternion.LookRotation(remotePlayer.nameText.transform.position - mainCamera.transform.position, Vector3.up);
             }
         }
+    }
+
+    private float GetRemoteFeetOffset()
+    {
+        if (localPlayer == null)
+        {
+            return DefaultRemoteFeetOffset;
+        }
+
+        CharacterController controller = localPlayer.GetComponent<CharacterController>();
+
+        if (controller == null)
+        {
+            return DefaultRemoteFeetOffset;
+        }
+
+        return controller.center.y - controller.height * 0.5f;
+    }
+
+    private void TryAlignRemoteFeet(RemotePlayer remotePlayer)
+    {
+        if (remotePlayer == null
+            || remotePlayer.feetAligned
+            || remotePlayer.transform == null
+            || remotePlayer.visualRoot == null)
+        {
+            return;
+        }
+
+        Renderer[] renderers = remotePlayer.visualRoot.GetComponentsInChildren<Renderer>(true);
+        bool hasBodyBounds = false;
+        Bounds bodyBounds = default;
+
+        foreach (Renderer targetRenderer in renderers)
+        {
+            if (targetRenderer == null
+                || !targetRenderer.enabled
+                || !targetRenderer.gameObject.activeInHierarchy
+                || IsRemoteDetectorRenderer(targetRenderer, remotePlayer.visualRoot))
+            {
+                continue;
+            }
+
+            if (!hasBodyBounds)
+            {
+                bodyBounds = targetRenderer.bounds;
+                hasBodyBounds = true;
+            }
+            else
+            {
+                bodyBounds.Encapsulate(targetRenderer.bounds);
+            }
+        }
+
+        if (!hasBodyBounds)
+        {
+            return;
+        }
+
+        float targetSoleY = remotePlayer.transform.position.y + GetRemoteFeetOffset() + RemoteSoleClearance;
+        remotePlayer.visualRoot.position += Vector3.up * (targetSoleY - bodyBounds.min.y);
+        remotePlayer.feetAligned = true;
+    }
+
+    private static bool IsRemoteDetectorRenderer(Renderer targetRenderer, Transform visualRoot)
+    {
+        Transform current = targetRenderer != null ? targetRenderer.transform : null;
+
+        while (current != null && current != visualRoot)
+        {
+            if (current.name == "Remote Metal Detector"
+                || current.name == "Detector Handle"
+                || current.name == "Detector Coil")
+            {
+                return true;
+            }
+
+            current = current.parent;
+        }
+
+        return false;
+    }
+
+    private static void UpdateRemoteNamePosition(RemotePlayer remotePlayer)
+    {
+        if (remotePlayer == null || remotePlayer.transform == null || remotePlayer.visualRoot == null || remotePlayer.nameText == null)
+        {
+            return;
+        }
+
+        Renderer[] renderers = remotePlayer.visualRoot.GetComponentsInChildren<Renderer>(true);
+        bool hasBounds = false;
+        Bounds visualBounds = default;
+
+        foreach (Renderer targetRenderer in renderers)
+        {
+            if (targetRenderer == null || !targetRenderer.enabled || !targetRenderer.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            if (!hasBounds)
+            {
+                visualBounds = targetRenderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                visualBounds.Encapsulate(targetRenderer.bounds);
+            }
+        }
+
+        Vector3 labelPosition = hasBounds
+            ? new Vector3(remotePlayer.transform.position.x, visualBounds.max.y + RemoteNameHeadClearance, remotePlayer.transform.position.z)
+            : remotePlayer.transform.TransformPoint(new Vector3(0f, 1.25f, 0f));
+        remotePlayer.nameText.transform.position = labelPosition;
     }
 
     private void RemoveRemotePlayer(int playerId)
@@ -2065,7 +2417,7 @@ public class LocalCoopManager : MonoBehaviour
 
         if (steamTransport != null)
         {
-            steamTransport.StopTransport();
+            steamTransport.LeaveLobby();
         }
     }
 

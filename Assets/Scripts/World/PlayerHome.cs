@@ -43,6 +43,7 @@ public class PlayerHome : MonoBehaviour
     private PlayerInventory.InventorySlot draggedBackpackItem;
     private Vector2 craftingRecipeScrollPosition;
     private int draggedCraftingSlotIndex = -1;
+    private int menuOpenedFrame = -1;
 
     private enum CraftingDragSource
     {
@@ -91,19 +92,19 @@ public class PlayerHome : MonoBehaviour
             messageTimer -= Time.deltaTime;
         }
 
-        if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame && IsPlayerNearPrimaryInteraction())
+        if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame)
         {
-            if (!GameUIState.AnyMenuOpen || isMenuOpen)
+            if (isMenuOpen)
             {
-                if (isMenuOpen)
+                if (Time.frameCount > menuOpenedFrame)
                 {
                     SetMenuOpen(false);
                 }
-                else
-                {
-                    pendingHomeConfirmation = HomeConfirmation.EnterHouse;
-                    SetMenuOpen(true);
-                }
+            }
+            else if (GameUIState.CanProcessGameplayInput && IsPlayerNearPrimaryInteraction())
+            {
+                pendingHomeConfirmation = HomeConfirmation.EnterHouse;
+                SetMenuOpen(true);
             }
         }
 
@@ -163,6 +164,11 @@ public class PlayerHome : MonoBehaviour
 
     public void SetMenuOpen(bool open)
     {
+        if (open && !isMenuOpen)
+        {
+            menuOpenedFrame = Time.frameCount;
+        }
+
         if (!open)
         {
             ReturnCraftingItemsToBackpack();
@@ -782,7 +788,7 @@ public class PlayerHome : MonoBehaviour
             return;
         }
 
-        if (IsPlayerNearPrimaryInteraction() && !GameUIState.AnyMenuOpen)
+        if (IsPlayerNearPrimaryInteraction() && GameUIState.CanProcessGameplayInput)
         {
             GameGui.DrawToast(new Rect(Screen.width * 0.5f - 190f, Screen.height - 178f, 380f, 40f), GameLocalization.T("hud.hint_use_home"));
         }
@@ -790,7 +796,7 @@ public class PlayerHome : MonoBehaviour
 
     private void UpdateHighlight()
     {
-        SetHighlighted(IsPlayerNearPrimaryInteraction() && !GameUIState.AnyMenuOpen);
+        SetHighlighted(IsPlayerNearPrimaryInteraction() && GameUIState.CanProcessGameplayInput);
     }
 
     private void SetHighlighted(bool highlighted)

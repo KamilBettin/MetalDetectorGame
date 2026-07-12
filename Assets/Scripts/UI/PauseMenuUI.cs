@@ -42,6 +42,22 @@ public class PauseMenuUI : MonoBehaviour
 
     private void Update()
     {
+        if (GameUIState.IsConfirmationOpen)
+        {
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            UpdateMessage();
+            return;
+        }
+
+        if (GameUIState.IsSettingsMenuOpen || GameUIState.IsCharacterSelectionOpen || GameUIState.MenuClosedThisFrame)
+        {
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            UpdateMessage();
+            return;
+        }
+
         if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
         {
             if (GameUIState.IsStartMenuOpen)
@@ -256,32 +272,47 @@ public class PauseMenuUI : MonoBehaviour
     private void ShowInviteInfo()
     {
         LocalCoopManager coopManager = LocalCoopManager.Instance;
+        string inviteMessage = "Start a Steam lobby from Multiplayer first.";
 
-        if (coopManager != null && coopManager.IsRunning)
+        if (coopManager != null && coopManager.OpenSteamInviteOverlay(out inviteMessage))
         {
-            ShowMessage("Invite: share your Steam ID/status with a friend from the multiplayer panel.");
+            ShowMessage(inviteMessage);
             return;
         }
 
-        ShowMessage("Start Steam Host from Multiplayer, then invite a friend with your Steam ID.");
+        ShowMessage(inviteMessage);
     }
 
     private void SaveGame()
     {
-        GameSaveSystem.SaveCurrentGame(out string saveMessage);
-        ShowMessage(saveMessage);
+        SaveSlotDialogUI.ShowSave(slotIndex =>
+        {
+            GameSaveSystem.SaveCurrentGame(slotIndex, out string saveMessage);
+            ShowMessage(saveMessage);
+        });
     }
 
     private void ReturnToMainMenu()
     {
+        SaveSlotDialogUI.ShowExitConfirmation(
+            CompleteReturnToMainMenu,
+            slotIndex =>
+            {
+                if (GameSaveSystem.SaveCurrentGame(slotIndex, out string saveMessage))
+                {
+                    CompleteReturnToMainMenu();
+                    return;
+                }
+
+                ShowMessage(saveMessage);
+            });
+    }
+
+    private void CompleteReturnToMainMenu()
+    {
         LocalCoopManager coopManager = LocalCoopManager.Instance;
-        bool isMultiplayer = coopManager != null && coopManager.IsRunning;
 
-        if (!isMultiplayer)
-        {
-            GameSaveSystem.CapturePauseResumeSnapshotIfSolo();
-        }
-
+        GameSaveSystem.ClearPauseResumeSnapshot();
         coopManager?.StopSession();
         SetOpen(false);
 
@@ -294,7 +325,23 @@ public class PauseMenuUI : MonoBehaviour
 
     private void QuitGame()
     {
-        SaveGame();
+        SaveSlotDialogUI.ShowExitConfirmation(
+            CompleteQuitGame,
+            slotIndex =>
+            {
+                if (GameSaveSystem.SaveCurrentGame(slotIndex, out string saveMessage))
+                {
+                    CompleteQuitGame();
+                    return;
+                }
+
+                ShowMessage(saveMessage);
+            });
+    }
+
+    private void CompleteQuitGame()
+    {
+        GameSaveSystem.ClearPauseResumeSnapshot();
         Application.Quit();
 
 #if UNITY_EDITOR

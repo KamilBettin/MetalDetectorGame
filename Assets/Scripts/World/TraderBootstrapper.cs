@@ -9,6 +9,7 @@ public static class TraderBootstrapper
     private const string FallbackVisualName = "Fallback Human";
     private const float TraderInteractionDistance = 4.2f;
     private const float GroundOffset = 0.03f;
+    private const int SellTraderAppearanceSeed = 672145;
 
     private static readonly Vector3 UpgradeTraderPosition = new Vector3(-664.7f, 66.270f, -723.3f);
     private static readonly Vector3 SellTraderPosition = new Vector3(-668.7f, 67.311f, -732.5f);
@@ -21,7 +22,7 @@ public static class TraderBootstrapper
         PlaceTrader(upgradeTrader, UpgradeTraderPosition, SellTraderPosition);
         PlaceTrader(sellTrader, SellTraderPosition, UpgradeTraderPosition);
         EnsureTraderVisuals(upgradeTrader, "UPGRADES", true, 381704);
-        EnsureTraderVisuals(sellTrader, "SELL", false, 781228);
+        EnsureTraderVisuals(sellTrader, "SELL", false, SellTraderAppearanceSeed);
         ConnectShops(upgradeTrader, sellTrader);
     }
 
@@ -201,7 +202,7 @@ public static class TraderBootstrapper
         if (!HasRenderableVisual(visualRoot))
         {
             PlayerCharacterSelection.CharacterProfile profile = new PlayerCharacterSelection.CharacterProfile(
-                upgradeTrader ? PlayerCharacterSelection.CharacterGender.Male : PlayerCharacterSelection.CharacterGender.Female,
+                PlayerCharacterSelection.CharacterGender.Male,
                 randomSeed
             );
             profile.displayName = upgradeTrader ? "Upgrade Trader" : "Sell Trader";

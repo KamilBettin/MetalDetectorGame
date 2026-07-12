@@ -116,6 +116,11 @@ InitTestScene*.unity*
 # but do not publish it in the repository.
 /steam_appid.txt
 
+# Local SteamPipe tools, credentials/cache and upload output.
+/SteamUpload/builder/
+/SteamUpload/output/
+/SteamUpload/steamcmd.zip
+
 # Local secrets and machine-specific config
 .env
 .env.*

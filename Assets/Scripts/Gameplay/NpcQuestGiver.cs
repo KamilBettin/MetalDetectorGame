@@ -120,7 +120,7 @@ public class NpcQuestGiver : MonoBehaviour
 
         if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame && IsPlayerInRange())
         {
-            if (!GameUIState.AnyMenuOpen || isMenuOpen)
+            if (isMenuOpen || GameUIState.CanProcessGameplayInput)
             {
                 SetMenuOpen(!isMenuOpen);
             }
@@ -429,7 +429,7 @@ public class NpcQuestGiver : MonoBehaviour
             return;
         }
 
-        if (IsPlayerInRange() && !GameUIState.AnyMenuOpen)
+        if (IsPlayerInRange() && GameUIState.CanProcessGameplayInput)
         {
             GameGui.DrawToast(new Rect(Screen.width * 0.5f - 175f, Screen.height - 178f, 350f, 40f), GameLocalization.TFormat("quest.talk_to", npcDisplayName));
         }

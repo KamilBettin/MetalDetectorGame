@@ -1,0 +1,16 @@
+"DepotBuildConfig"
+{
+    "DepotID"      "4916781"
+    "ContentRoot"  "C:\Users\Kamil\MetalDetectorGame\Builds"
+
+    "FileMapping"
+    {
+        "LocalPath"    "*"
+        "DepotPath"    "."
+        "recursive"    "1"
+    }
+
+    "FileExclusion" "MetalDetectorGame_BurstDebugInformation_DoNotShip\*"
+    "FileExclusion" "*.pdb"
+    "FileExclusion" "steam_appid.txt"
+}

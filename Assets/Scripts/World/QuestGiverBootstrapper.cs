@@ -7,6 +7,7 @@ public static class QuestGiverBootstrapper
     private const string FallbackVisualName = "Fallback Human";
     private const float InteractionDistance = 4.2f;
     private const float GroundOffset = 0.03f;
+    private const int QuestGiverAppearanceSeed = 815307;
     private static readonly Vector3 QuestGiverPosition = new Vector3(-677.5f, 68.3f, -733.1f);
 
     public static void EnsureQuestGiverAtHome()
@@ -114,7 +115,10 @@ public static class QuestGiverBootstrapper
 
         if (!HasRenderableVisual(visualRoot))
         {
-            PlayerCharacterSelection.CharacterProfile profile = new PlayerCharacterSelection.CharacterProfile(PlayerCharacterSelection.CharacterGender.Female, 918271);
+            PlayerCharacterSelection.CharacterProfile profile = new PlayerCharacterSelection.CharacterProfile(
+                PlayerCharacterSelection.CharacterGender.Female,
+                QuestGiverAppearanceSeed
+            );
             profile.displayName = "Mira Quest Giver";
             UmaCharacterFactory.TryCreateCharacter(visualRoot, profile, out _);
         }
