@@ -500,7 +500,7 @@ public class SceneTransitionManager : MonoBehaviour
 
         RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
         RenderSettings.ambientLight = new Color(0.13f, 0.12f, 0.105f, 1f);
-        RenderSettings.ambientIntensity = 0.36f;
+        RenderSettings.ambientIntensity = 0.40f;
         RenderSettings.reflectionIntensity = 0.10f;
         LightmapSettings.lightmaps = new LightmapData[0];
         LightmapSettings.lightProbes = null;
@@ -514,7 +514,7 @@ public class SceneTransitionManager : MonoBehaviour
                 continue;
             }
 
-            light.intensity = 0.16f;
+            light.intensity = 0.18f;
             light.shadowStrength = 0.2f;
             light.shadows = LightShadows.None;
         }

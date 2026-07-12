@@ -778,12 +778,12 @@ public static class EnvironmentScatterBootstrapper
             },
             minScale: 1.8f,
             maxScale: 2.16f,
-            wanderRadius: 11f,
-            pauseChance: 0.08f,
-            runChance: 0.75f,
+            wanderRadius: 18f,
+            pauseChance: 0.36f,
+            runChance: 0.28f,
             groundYOffset: -0.12f,
-            walkSpeed: 2f,
-            runSpeed: 4.6f);
+            walkSpeed: 1.45f,
+            runSpeed: 3.4f);
 
         placedCount += PlaceHomeAnimals(
             terrain,
@@ -876,7 +876,21 @@ public static class EnvironmentScatterBootstrapper
             DisableAnimalPlayerInputScripts(instance);
 
             AnimalWanderController wanderController = instance.AddComponent<AnimalWanderController>();
-            wanderController.Configure(instance.transform.position, wanderRadius, 1.2f, 4.4f, pauseChance, runChance, groundYOffset, walkSpeed, runSpeed);
+            bool isDog = prefab.name.Contains("Dog");
+            float minDecisionTime = isDog ? 6f : 1.2f;
+            float maxDecisionTime = isDog ? 11f : 4.4f;
+            float minimumTargetDistance = isDog ? Mathf.Min(8f, wanderRadius * 0.6f) : 0f;
+            wanderController.Configure(
+                instance.transform.position,
+                wanderRadius,
+                minDecisionTime,
+                maxDecisionTime,
+                pauseChance,
+                runChance,
+                groundYOffset,
+                walkSpeed,
+                runSpeed,
+                minimumTargetDistance);
             placedCount++;
         }
 

@@ -19,11 +19,22 @@ public class AnimalWanderController : MonoBehaviour
     private float walkSpeed = 1.2f;
     private float runSpeed = 3.2f;
     private float turnSpeed = 320f;
+    private float minimumTargetDistance;
     private float decisionTimer;
     private bool isPaused;
     private bool isRunning;
 
-    public void Configure(Vector3 home, float radius, float minTime, float maxTime, float pause, float run, float groundOffset, float walk, float runMoveSpeed)
+    public void Configure(
+        Vector3 home,
+        float radius,
+        float minTime,
+        float maxTime,
+        float pause,
+        float run,
+        float groundOffset,
+        float walk,
+        float runMoveSpeed,
+        float minTargetDistance = 0f)
     {
         homePosition = home;
         wanderRadius = Mathf.Max(1f, radius);
@@ -34,6 +45,7 @@ public class AnimalWanderController : MonoBehaviour
         groundYOffset = groundOffset;
         walkSpeed = Mathf.Max(0.1f, walk);
         runSpeed = Mathf.Max(walkSpeed, runMoveSpeed);
+        minimumTargetDistance = Mathf.Clamp(minTargetDistance, 0f, wanderRadius * 0.9f);
         StickToTerrain();
         PickNextTarget();
     }
@@ -96,8 +108,23 @@ public class AnimalWanderController : MonoBehaviour
             return;
         }
 
-        Vector2 offset = Random.insideUnitCircle * wanderRadius;
-        targetPosition = homePosition + new Vector3(offset.x, 0f, offset.y);
+        Vector3 nextTarget = homePosition;
+
+        for (int attempt = 0; attempt < 12; attempt++)
+        {
+            Vector2 offset = Random.insideUnitCircle * wanderRadius;
+            nextTarget = homePosition + new Vector3(offset.x, 0f, offset.y);
+
+            Vector3 travelOffset = nextTarget - transform.position;
+            travelOffset.y = 0f;
+
+            if (travelOffset.magnitude >= minimumTargetDistance)
+            {
+                break;
+            }
+        }
+
+        targetPosition = nextTarget;
     }
 
     private void StickToTerrain()
